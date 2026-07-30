@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "archive": {
+      "offlinePath": ".cache/dl/honk-63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz",
+      "sha256": "e957a69654219712dadf8f9a6f3a7774fd9dccf57c585fe460122a1d259fe871",
+      "size": 820960,
+      "topLevelDirectory": "honk-63e271065246bb68ecadf9ae53abecf748806ad3",
+      "url": "https://github.com/Glassyiris/honk/archive/63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz"
+    },
+    "canonicalUrl": "https://github.com/Glassyiris/honk.git",
+    "commit": "63e271065246bb68ecadf9ae53abecf748806ad3",
+    "license": {
+      "sourceLicenseUrl": "https://github.com/Glassyiris/honk/blob/63e271065246bb68ecadf9ae53abecf748806ad3/LICENSE",
+      "spdx": "GPL-3.0-only"
+    },
+    "patchDigests": [],
+    "provenance": {
+      "archiveSource": "GitHub commit archive",
+      "observedFrom": "protected local Git object database",
+      "providerPath": "github.com/Glassyiris/honk/archive/63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz"
+    },
+    "tagObservation": {
+      "name": "v0.0.1.beta.25",
+      "object": "63e271065246bb68ecadf9ae53abecf748806ad3",
+      "signatureStatus": "unsigned"
+    },
+    "tree": "04e4d0e2a9e422130e228560526eb400e5e606c0"
+  }
+}

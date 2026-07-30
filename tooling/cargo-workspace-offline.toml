@@ -1,0 +1,8 @@
+[source.crates-io]
+replace-with = "honk-workspace-vendor"
+
+[source.honk-workspace-vendor]
+directory = "/home/breeze/honk-dev/openwrt-honk/.cache/dl/cargo-vendor/workspace"
+
+[net]
+offline = true

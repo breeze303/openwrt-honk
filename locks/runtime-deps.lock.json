@@ -1,0 +1,37 @@
+{
+  "contract": {
+    "availability": "blocked",
+    "canonicalSourceUrl": "https://downloads.openwrt.org",
+    "immutableVersion": "requires locked target feed",
+    "offlineArchivePath": ".cache/dl/apk",
+    "providerPath": "APK index preflight",
+    "sha256": null,
+    "sourceLicenseUrl": "https://github.com/openwrt/openwrt/blob/master/LICENSES/GPL-2.0-only.txt",
+    "spdxLicense": "GPL-2.0-only"
+  },
+  "providers": [],
+  "reason": "provider versions, APK hashes, and kernel configuration require the locked target feed",
+  "requiredConfigProbes": [
+    "CONFIG_BPF",
+    "CONFIG_BPF_SYSCALL",
+    "CONFIG_BPF_JIT",
+    "CONFIG_CGROUP_BPF",
+    "CONFIG_NET_CLS_BPF",
+    "CONFIG_NET_SCH_INGRESS",
+    "CONFIG_NET_CLS_ACT",
+    "CONFIG_NET_NS",
+    "CONFIG_VETH",
+    "CONFIG_DEBUG_INFO_BTF"
+  ],
+  "requiredPackages": [
+    "ip-full",
+    "tc-full",
+    "nsenter",
+    "busybox",
+    "ca-bundle",
+    "kmod-sched-core",
+    "kmod-sched-bpf",
+    "kmod-veth"
+  ],
+  "schemaVersion": 1
+}

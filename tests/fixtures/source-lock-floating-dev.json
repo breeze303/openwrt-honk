@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "canonicalUrl": "https://github.com/Glassyiris/honk.git",
+    "commit": "dev",
+    "tree": "04e4d0e2a9e422130e228560526eb400e5e606c0",
+    "archive": {
+      "url": "https://github.com/Glassyiris/honk/archive/dev.tar.gz",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 1,
+      "topLevelDirectory": "honk-dev"
+    }
+  }
+}

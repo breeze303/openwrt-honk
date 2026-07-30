@@ -1,0 +1,39 @@
+{
+  "apkSigning": {
+    "keyPath": null,
+    "keySha256": null
+  },
+  "contract": {
+    "availability": "blocked",
+    "canonicalSourceUrl": "https://downloads.immortalwrt.org",
+    "immutableVersion": "ImmortalWrt SNAPSHOT r0-6efdfa7",
+    "offlineArchivePath": ".cache/dl/openwrt",
+    "providerPath": "target-preflight",
+    "sha256": null,
+    "sourceLicenseUrl": "https://github.com/openwrt/openwrt/blob/master/LICENSES/GPL-2.0-only.txt",
+    "spdxLicense": "GPL-2.0-only"
+  },
+  "reason": "VM facts passed inherited-FD preflight, but immutable SDK/image URLs, hashes, and APK signing keys remain unavailable for this moving snapshot",
+  "schemaVersion": 1,
+  "targets": [
+    {
+      "image": null,
+      "observedVm": {
+        "apkVersion": "apk-tools 3.0.5, compiled for x86_64.",
+        "kernel": "6.18.33",
+        "receiptSha256": "60115384a31345297b7dcf4fe7a46255303769c0b6b48d653ea48c9eea511533"
+      },
+      "packageArch": "x86_64",
+      "sdk": null,
+      "subtarget": "64",
+      "target": "x86"
+    },
+    {
+      "image": null,
+      "packageArch": "aarch64_generic",
+      "sdk": null,
+      "subtarget": "armv8",
+      "target": "armsr"
+    }
+  ]
+}

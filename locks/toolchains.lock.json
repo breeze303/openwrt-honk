@@ -1,0 +1,131 @@
+{
+  "cargoClosures": {
+    "ebpf": {
+      "lockPath": "crates/honk-ebpf/Cargo.lock",
+      "lockSha256": "7a2573128a47a26f2fb9014659bd7371096ebafe44a8da96e642be8fe834e5a6",
+      "metadataSha256": "0b36e3564f23e7276c9113936d6f68af11870ad92754446cf4ed21bfb06791bb",
+      "sourceCommit": "63e271065246bb68ecadf9ae53abecf748806ad3",
+      "status": "attested",
+      "vendorPath": ".cache/dl/cargo-vendor/ebpf",
+      "vendorSha256": "9eb23f6cfa7f62dc36f6533ee1e3eb235a8c61d2f73ba668c534863a536f433c"
+    },
+    "nightlyRustSrc": {
+      "archiveSha256": "9fa8fd8ec2ebc37b24fdebcceeaa9b6ed61efd0ff309e3c4bad0857c430147dd",
+      "archiveSize": 5836512,
+      "lockPath": "library/Cargo.lock",
+      "lockSha256": "0cd31e4d5c49d7cfbfc479e5cb63001a60c8fdca365677e8ee92137a2b5aaeeb",
+      "manifestSha256": "366d927ebc489678db98f680969c3e6b09bcfc33f6fb3b0978ba242bda9c4410",
+      "offlineArchivePath": ".cache/dl/rust-src-nightly-2026-07-28.tar.xz",
+      "sourceCommit": "63e271065246bb68ecadf9ae53abecf748806ad3",
+      "status": "attested"
+    },
+    "requiredFeatureEdges": [
+      {
+        "features": [
+          "fs",
+          "time"
+        ],
+        "from": "honk-core",
+        "to": "nix"
+      },
+      {
+        "features": [],
+        "from": "honk-outbound",
+        "to": "thiserror"
+      },
+      {
+        "features": [
+          "test-util"
+        ],
+        "from": "honk-outbound dev-dependency",
+        "to": "tokio"
+      }
+    ],
+    "workspace": {
+      "lockPath": "Cargo.lock",
+      "lockSha256": "8669d63dcbb0a8ecbe1d6af0942b9ced229fab5f5a778a8f9545155170f547da",
+      "metadataSha256": "aaba31dc14c44f1753a39a8b41a08f1962127ccb3d176457a73dbe193756b847",
+      "sourceCommit": "63e271065246bb68ecadf9ae53abecf748806ad3",
+      "status": "attested",
+      "vendorPath": ".cache/dl/cargo-vendor/workspace",
+      "vendorSha256": "9435bfd3d4852a518ed5cb8eb248dab43ad0055bbf85821a32a33e771094426e"
+    }
+  },
+  "contract": {
+    "availability": "blocked",
+    "canonicalSourceUrl": "https://static.rust-lang.org",
+    "immutableVersion": "rustc-1.94.1 and nightly-2026-07-27",
+    "offlineArchivePath": ".cache/dl/toolchains",
+    "providerPath": ".cache/dl/toolchains",
+    "sha256": "8669d63dcbb0a8ecbe1d6af0942b9ced229fab5f5a778a8f9545155170f547da",
+    "sourceLicenseUrl": "https://github.com/rust-lang/rust/blob/1.94.1/LICENSE-APACHE",
+    "spdxLicense": "Apache-2.0 OR MIT"
+  },
+  "rust": {
+    "nightly": {
+      "commit": "09ee43b2d6055539771bee8ac30a6e56eb4db773",
+      "components": [
+        "cargo",
+        "clippy",
+        "rust-docs",
+        "rust-std",
+        "rustc",
+        "rustfmt"
+      ],
+      "date": "2026-07-27",
+      "release": "1.99.0-nightly",
+      "rustSrc": {
+        "archiveSha256": "9fa8fd8ec2ebc37b24fdebcceeaa9b6ed61efd0ff309e3c4bad0857c430147dd",
+        "archiveSize": 5836512,
+        "availability": "attested",
+        "channelManifestPath": ".cache/dl/channel-rust-nightly-2026-07-28.toml",
+        "channelManifestSha256": "366d927ebc489678db98f680969c3e6b09bcfc33f6fb3b0978ba242bda9c4410",
+        "sourcePath": "lib/rustlib/src/rust/library/Cargo.lock",
+        "xzHash": "9fa8fd8ec2ebc37b24fdebcceeaa9b6ed61efd0ff309e3c4bad0857c430147dd"
+      }
+    },
+    "stable": {
+      "availability": "attested",
+      "channelManifestPath": ".cache/dl/channel-rust-1.94.1.toml",
+      "channelManifestSha256": "cc2f04dfc883549d683c8cc2a9393f523a3dfbd931f5d5eaef00303cca64a60d",
+      "channelManifestVersion": "1.94.1 (e408947bf 2026-03-25)",
+      "commit": "e408947bfd200af42db322daf0fadfe7e26d3bd1",
+      "components": [
+        "cargo",
+        "clippy",
+        "rust-docs",
+        "rust-std",
+        "rustc",
+        "rustfmt"
+      ],
+      "release": "1.94.1"
+    }
+  },
+  "schemaVersion": 1,
+  "tools": {
+    "boringSsl": {
+      "availability": "locked-by-Cargo.lock",
+      "version": "boring-sys 5.x"
+    },
+    "bpfLinker": {
+      "availability": "missing",
+      "version": null
+    },
+    "libclang": {
+      "availability": "installed-not-archived",
+      "version": "21.0.0"
+    },
+    "llvm": {
+      "availability": "installed-not-archived",
+      "version": "21.0.0"
+    },
+    "node": {
+      "availability": "installed-not-archived",
+      "version": "v22.19.0"
+    },
+    "zig": {
+      "availability": "missing",
+      "version": null
+    }
+  }
+}

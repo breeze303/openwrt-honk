@@ -1,0 +1,15 @@
+{
+  "command": null,
+  "contract": {
+    "availability": "blocked",
+    "canonicalSourceUrl": "https://www.qemu.org",
+    "immutableVersion": "requires locked OpenWrt image",
+    "offlineArchivePath": ".cache/dl/qemu",
+    "providerPath": ".cache/dl/qemu",
+    "sha256": null,
+    "sourceLicenseUrl": "https://www.qemu.org/docs/master/about/license.html",
+    "spdxLicense": "GPL-2.0-only"
+  },
+  "reason": "QEMU command and image hash must derive from the exact locked target image",
+  "schemaVersion": 1
+}

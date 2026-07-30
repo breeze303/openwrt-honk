@@ -1,0 +1,26 @@
+{
+  "assets": [
+    {
+      "installPath": "/usr/share/honk/geoip.dat",
+      "package": "v2ray-geoip",
+      "sha256": null
+    },
+    {
+      "installPath": "/usr/share/honk/geosite.dat",
+      "package": "v2ray-geosite",
+      "sha256": null
+    }
+  ],
+  "contract": {
+    "availability": "blocked",
+    "canonicalSourceUrl": "https://github.com/v2fly/geoip",
+    "immutableVersion": "requires target-feed package resolution",
+    "offlineArchivePath": ".cache/dl/geo",
+    "providerPath": "APK index preflight",
+    "sha256": null,
+    "sourceLicenseUrl": "https://github.com/v2fly/geoip/blob/master/LICENSE",
+    "spdxLicense": "CC-BY-SA-4.0"
+  },
+  "reason": "exact package providers and asset hashes require the locked OpenWrt APK index",
+  "schemaVersion": 1
+}

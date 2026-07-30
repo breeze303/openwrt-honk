@@ -1,0 +1,8 @@
+[source.crates-io]
+replace-with = "honk-ebpf-vendor"
+
+[source.honk-ebpf-vendor]
+directory = "/home/breeze/honk-dev/openwrt-honk/.cache/dl/cargo-vendor/ebpf"
+
+[net]
+offline = true

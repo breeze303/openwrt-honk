@@ -1,0 +1,2 @@
+This is a deliberately malformed fixture.
+LAB_VM_PASSWORD

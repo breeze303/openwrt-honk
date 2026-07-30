@@ -1,0 +1,14 @@
+{
+  "contract": {
+    "availability": "blocked",
+    "canonicalSourceUrl": "https://playwright.dev",
+    "immutableVersion": "not selected before Todo 7",
+    "offlineArchivePath": ".cache/dl/browser",
+    "providerPath": ".cache/dl/browser",
+    "sha256": null,
+    "sourceLicenseUrl": "https://github.com/microsoft/playwright/blob/main/LICENSE",
+    "spdxLicense": "Apache-2.0"
+  },
+  "reason": "browser/Playwright versions are intentionally deferred until the Todo 7 frontend contract exists",
+  "schemaVersion": 1
+}

@@ -1,0 +1,18 @@
+{
+  "contract": {
+    "availability": "blocked",
+    "canonicalSourceUrl": "https://github.com/Glassyiris/honk.git",
+    "immutableVersion": "63e271065246bb68ecadf9ae53abecf748806ad3",
+    "offlineArchivePath": ".cache/dl/helpers",
+    "providerPath": "tests/helpers",
+    "sha256": "e957a69654219712dadf8f9a6f3a7774fd9dccf57c585fe460122a1d259fe871",
+    "sourceLicenseUrl": "https://github.com/Glassyiris/honk/blob/63e271065246bb68ecadf9ae53abecf748806ad3/LICENSE",
+    "spdxLicense": "GPL-3.0-only"
+  },
+  "dependencies": [],
+  "reason": "target-architecture helper implementation belongs to Todo 3",
+  "schemaVersion": 1,
+  "sourceCommit": "63e271065246bb68ecadf9ae53abecf748806ad3",
+  "targetHashes": {},
+  "toolchain": null
+}
