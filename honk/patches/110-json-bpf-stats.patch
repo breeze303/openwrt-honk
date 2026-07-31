@@ -1,0 +1,94 @@
+diff --git a/crates/honk-tool/src/bpf.rs b/crates/honk-tool/src/bpf.rs
+index e35265f..c8e3e60 100644
+--- a/crates/honk-tool/src/bpf.rs
++++ b/crates/honk-tool/src/bpf.rs
+@@ -208,6 +208,9 @@ pub struct StatsArgs {
+     /// BPF pin root.
+     #[arg(long, default_value = "/sys/fs/bpf")]
+     pub pin_root: PathBuf,
++    /// Emit machine-readable decimal-string counters.
++    #[arg(long)]
++    pub json: bool,
+ }
+ 
+ pub async fn run(args: BpfArgs) -> anyhow::Result<()> {
+@@ -373,18 +376,25 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
+     let fd = open(&args.pin_root, "BPF_STATS_MAP")?;
+     let udp_ovf: u64 = read_value(fd, &0u32.to_ne_bytes())?.unwrap_or(0);
+     let tcp_ovf: u64 = read_value(fd, &1u32.to_ne_bytes())?.unwrap_or(0);
+-    println!("conn-state overflow: udp={udp_ovf} tcp={tcp_ovf}");
++    if !args.json {
++        println!("conn-state overflow: udp={udp_ovf} tcp={tcp_ovf}");
++    }
+ 
+     let fd = open(&args.pin_root, "CONN_STATE_OCCUPANCY")?;
+     let inserts = read_percpu_sum(fd, ncpu, 0)?;
+     let deletes = read_percpu_sum(fd, ncpu, 1)?;
+-    println!(
+-        "conn-state occupancy: inserts={inserts} ebpf_deletes={deletes} raw_live={}",
+-        inserts.saturating_sub(deletes)
+-    );
++    if !args.json {
++        println!(
++            "conn-state occupancy: inserts={inserts} ebpf_deletes={deletes} raw_live={}",
++            inserts.saturating_sub(deletes)
++        );
++    }
+ 
+     let fd = open(&args.pin_root, "OUTBOUND_STATS")?;
+-    println!("\noutbound counters (tx_pkts tx_bytes rx_pkts rx_bytes):");
++    if !args.json {
++        println!("\noutbound counters (tx_pkts tx_bytes rx_pkts rx_bytes):");
++    }
++    let mut outbounds = Vec::new();
+     for outbound in 0..=255u32 {
+         let base = outbound * 4;
+         let (txp, txb, rxp, rxb) = (
+@@ -394,8 +404,34 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
+             read_percpu_sum(fd, ncpu, base + 3)?,
+         );
+         if txp + txb + rxp + rxb > 0 {
+-            println!("  outbound {outbound:<4} {txp} {txb} {rxp} {rxb}");
++            if args.json {
++                outbounds.push(serde_json::json!({
++                    "id": outbound,
++                    "txPackets": txp.to_string(),
++                    "txBytes": txb.to_string(),
++                    "rxPackets": rxp.to_string(),
++                    "rxBytes": rxb.to_string(),
++                }));
++            } else {
++                println!("  outbound {outbound:<4} {txp} {txb} {rxp} {rxb}");
++            }
+         }
+     }
++    if args.json {
++        println!(
++            "{}",
++            serde_json::json!({
++                "ok": true,
++                "available": true,
++                "overflow": { "udp": udp_ovf.to_string(), "tcp": tcp_ovf.to_string() },
++                "occupancy": {
++                    "inserts": inserts.to_string(),
++                    "deletes": deletes.to_string(),
++                    "live": inserts.saturating_sub(deletes).to_string(),
++                },
++                "outbounds": outbounds,
++            })
++        );
++    }
+     Ok(())
+ }
+diff --git a/crates/honk-tool/src/diagnose.rs b/crates/honk-tool/src/diagnose.rs
+index 16a7383..5073c28 100644
+--- a/crates/honk-tool/src/diagnose.rs
++++ b/crates/honk-tool/src/diagnose.rs
+@@ -67,6 +67,7 @@ pub async fn run(args: DiagnoseArgs) -> anyhow::Result<()> {
+     // 5. Occupancy + overflow via the bpf stats path.
+     match super::bpf::stats(super::bpf::StatsArgs {
+         pin_root: args.pin_root.clone(),
++        json: false,
+     }) {
+         Ok(()) => {}
+         Err(e) => {

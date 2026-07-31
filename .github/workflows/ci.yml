@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test tools
+        run: sudo apt-get update && sudo apt-get install -y jq lua5.4
+      - name: Restore locked source archive
+        run: |
+          mkdir -p .cache/dl
+          curl --fail --location --output .cache/dl/honk-63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz \
+            https://github.com/Glassyiris/honk/archive/63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz
+          echo 'e957a69654219712dadf8f9a6f3a7774fd9dccf57c585fe460122a1d259fe871  .cache/dl/honk-63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz' | sha256sum -c -
+      - run: bash tests/run-tests.sh
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: luci-app-honk/ui/package-lock.json
+      - working-directory: luci-app-honk/ui
+        run: npm ci && npm run build
+      - run: git diff --exit-code -- luci-app-honk/root/www/luci-static/resources/honk/dashboard

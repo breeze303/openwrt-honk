@@ -1,0 +1,78 @@
+diff --git a/crates/honk-tool/src/bpf.rs b/crates/honk-tool/src/bpf.rs
+index c8e3e60..48b6c7a 100644
+--- a/crates/honk-tool/src/bpf.rs
++++ b/crates/honk-tool/src/bpf.rs
+@@ -211,6 +211,9 @@ pub struct StatsArgs {
+     /// Emit machine-readable decimal-string counters.
+     #[arg(long)]
+     pub json: bool,
++    /// Sample duration used to calculate byte rates (0 disables sampling).
++    #[arg(long, default_value_t = 0)]
++    pub sample_ms: u64,
+ }
+ 
+ pub async fn run(args: BpfArgs) -> anyhow::Result<()> {
+@@ -394,6 +397,19 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
+     if !args.json {
+         println!("\noutbound counters (tx_pkts tx_bytes rx_pkts rx_bytes):");
+     }
++    let mut before = vec![[0u64; 4]; 256];
++    if args.sample_ms > 0 {
++        for outbound in 0..=255u32 {
++            let base = outbound * 4;
++            before[outbound as usize] = [
++                read_percpu_sum(fd, ncpu, base)?,
++                read_percpu_sum(fd, ncpu, base + 1)?,
++                read_percpu_sum(fd, ncpu, base + 2)?,
++                read_percpu_sum(fd, ncpu, base + 3)?,
++            ];
++        }
++        std::thread::sleep(std::time::Duration::from_millis(args.sample_ms));
++    }
+     let mut outbounds = Vec::new();
+     for outbound in 0..=255u32 {
+         let base = outbound * 4;
+@@ -405,12 +421,23 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
+         );
+         if txp + txb + rxp + rxb > 0 {
+             if args.json {
++                let (tx_rate, rx_rate) = if args.sample_ms > 0 {
++                    let previous = before[outbound as usize];
++                    (
++                        txb.saturating_sub(previous[1]).saturating_mul(1000) / args.sample_ms,
++                        rxb.saturating_sub(previous[3]).saturating_mul(1000) / args.sample_ms,
++                    )
++                } else {
++                    (0, 0)
++                };
+                 outbounds.push(serde_json::json!({
+                     "id": outbound,
+                     "txPackets": txp.to_string(),
+                     "txBytes": txb.to_string(),
+                     "rxPackets": rxp.to_string(),
+                     "rxBytes": rxb.to_string(),
++                    "txBytesPerSecond": tx_rate.to_string(),
++                    "rxBytesPerSecond": rx_rate.to_string(),
+                 }));
+             } else {
+                 println!("  outbound {outbound:<4} {txp} {txb} {rxp} {rxb}");
+@@ -423,6 +446,7 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
+             serde_json::json!({
+                 "ok": true,
+                 "available": true,
++                "sampleMs": args.sample_ms,
+                 "overflow": { "udp": udp_ovf.to_string(), "tcp": tcp_ovf.to_string() },
+                 "occupancy": {
+                     "inserts": inserts.to_string(),
+diff --git a/crates/honk-tool/src/diagnose.rs b/crates/honk-tool/src/diagnose.rs
+index 5073c28..9ab467c 100644
+--- a/crates/honk-tool/src/diagnose.rs
++++ b/crates/honk-tool/src/diagnose.rs
+@@ -68,6 +68,7 @@ pub async fn run(args: DiagnoseArgs) -> anyhow::Result<()> {
+     match super::bpf::stats(super::bpf::StatsArgs {
+         pin_root: args.pin_root.clone(),
+         json: false,
++        sample_ms: 0,
+     }) {
+         Ok(()) => {}
+         Err(e) => {

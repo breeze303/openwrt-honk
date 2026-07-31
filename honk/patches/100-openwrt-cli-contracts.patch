@@ -1,0 +1,111 @@
+diff --git a/crates/honk-tool/Cargo.toml b/crates/honk-tool/Cargo.toml
+index 36c4cdf..ba34a64 100644
+--- a/crates/honk-tool/Cargo.toml
++++ b/crates/honk-tool/Cargo.toml
+@@ -20,3 +20,4 @@ libc.workspace = true
+ tokio.workspace = true
+ tracing.workspace = true
+ tracing-subscriber.workspace = true
++serde_json.workspace = true
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1645,6 +1645,7 @@ dependencies = [
+  "honk-ebpf-common",
+  "honk-outbound",
+  "libc",
++ "serde_json",
+  "tokio",
+  "tracing",
+  "tracing-subscriber",
+ ]
+diff --git a/crates/honk-tool/src/main.rs b/crates/honk-tool/src/main.rs
+index c6f313e..eb492c4 100644
+--- a/crates/honk-tool/src/main.rs
++++ b/crates/honk-tool/src/main.rs
+@@ -6,6 +6,7 @@
+ mod bpf;
+ mod diagnose;
+ mod sub;
++mod validate;
+ 
+ use clap::{Parser, Subcommand};
+ 
+@@ -25,6 +26,8 @@ enum Command {
+     Bpf(bpf::BpfArgs),
+     /// One-shot health check of a running honk engine.
+     Diagnose(diagnose::DiagnoseArgs),
++    /// Parse and validate a Honk configuration without starting the engine.
++    Validate(validate::ValidateArgs),
+ }
+ 
+ #[tokio::main]
+@@ -40,5 +43,6 @@ async fn main() -> anyhow::Result<()> {
+         Command::Sub(args) => sub::run(args).await,
+         Command::Bpf(args) => bpf::run(args).await,
+         Command::Diagnose(args) => diagnose::run(args).await,
++        Command::Validate(args) => validate::run(args),
+     }
+ }
+diff --git /dev/null b/crates/honk-tool/src/validate.rs
+new file mode 100644
+index 0000000..a6d5e21
+--- /dev/null
++++ b/crates/honk-tool/src/validate.rs
+@@ -0,0 +1,56 @@
++use anyhow::{Context, Result};
++use clap::Args;
++use honk_config::Config;
++use std::path::PathBuf;
++
++#[derive(Args)]
++pub struct ValidateArgs {
++    /// Configuration path. The path is fixed by the OpenWrt service wrapper.
++    #[arg(long, conflicts_with = "config_fd")]
++    pub config: Option<PathBuf>,
++    /// Read the configuration from an already-open file descriptor.
++    #[arg(long, conflicts_with = "config")]
++    pub config_fd: Option<i32>,
++    /// Logical path used in diagnostics when reading from a file descriptor.
++    #[arg(long, default_value = "<config-fd>")]
++    pub logical_path: String,
++    /// Emit a machine-readable result.
++    #[arg(long)]
++    pub json: bool,
++}
++
++pub fn run(args: ValidateArgs) -> Result<()> {
++    let path = if let Some(fd) = args.config_fd {
++        format!("/proc/self/fd/{fd}")
++    } else {
++        args.config
++            .unwrap_or_else(|| PathBuf::from("/etc/honk/config.dae"))
++            .to_string_lossy()
++            .into_owned()
++    };
++
++    let result = Config::from_file(&path).and_then(|config| config.validate());
++    match result {
++        Ok(()) => {
++            if args.json {
++                println!(
++                    "{{\"ok\":true,\"path\":{}}}",
++                    serde_json::to_string(&args.logical_path)?
++                );
++            } else {
++                println!("configuration is valid: {}", path);
++            }
++            Ok(())
++        }
++        Err(error) => {
++            if args.json {
++                println!(
++                    "{{\"ok\":false,\"path\":{},\"error\":{}}}",
++                    serde_json::to_string(&args.logical_path)?,
++                    serde_json::to_string(&error.to_string())?
++                );
++            }
++            Err(anyhow::anyhow!("{}: {error}", path)).context("configuration validation failed")
++        }
++    }
++}

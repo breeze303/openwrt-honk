@@ -1,0 +1,68 @@
+{
+	"admin/services/honk": {
+		"title": "Honk",
+		"order": 50,
+		"action": {
+			"type": "template",
+			"path": "honk/dashboard"
+		},
+		"depends": {
+			"acl": [ "luci-app-honk" ],
+			"fs": { "/etc/config/honk": "file" }
+		}
+	},
+	"admin/services/honk/dashboard": {
+		"action": { "type": "template", "path": "honk/dashboard" }
+	},
+	"admin/services/honk/config": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "redirect_config" }
+	},
+	"admin/services/honk/api/dashboard": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_dashboard" }
+	},
+	"admin/services/honk/api/dashboard_prepare": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_dashboard_prepare" }
+	},
+	"admin/services/honk/api/state": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_state" }
+	},
+	"admin/services/honk/api/validate": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_validate" }
+	},
+	"admin/services/honk/api/save": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_save" }
+	},
+	"admin/services/honk/api/apply": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_apply" }
+	},
+	"admin/services/honk/api/service": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_service" }
+	},
+	"admin/services/honk/api/logs": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_logs" }
+	},
+	"admin/services/honk/api/traffic": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_traffic" }
+	},
+	"admin/services/honk/api/model": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_model" }
+	},
+	"admin/services/honk/api/runtime_nodes": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_runtime_nodes" }
+	},
+	"admin/services/honk/api/model_parse": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_model_parse" }
+	},
+	"admin/services/honk/api/model_preview": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_model_preview" }
+	},
+	"admin/services/honk/api/model_apply": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_model_apply" }
+	},
+	"admin/services/honk/api/node_parse": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_node_parse" }
+	},
+	"admin/services/honk/api/node_test": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_node_test" }
+	}
+}

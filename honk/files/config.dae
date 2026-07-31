@@ -1,0 +1,34 @@
+global {
+	wan_interface: auto
+	lan_interface: auto
+	log_level: info
+	dial_mode: domain
+	allow_insecure: false
+	auto_config_kernel_parameter: true
+	tcp_check_url: 'http://cp.cloudflare.com,1.1.1.1'
+	tcp_check_http_method: HEAD
+	udp_check_dns: 'dns.google.com:53,8.8.8.8'
+	check_interval: 30s
+	check_tolerance: 50ms
+}
+
+routing {
+	fallback: direct
+}
+
+experimental {
+	clash_api {
+		external_controller: '0.0.0.0:9090'
+		external_ui: '/www/luci-static/resources/honk/app'
+		secret: ''
+		default_mode: 'Rule'
+	}
+
+	cache_file {
+		enabled: true
+		path: '/etc/honk/cache.db'
+		cache_id: 'openwrt'
+		store_fakeip: false
+		store_dns: false
+	}
+}

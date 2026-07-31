@@ -1,0 +1,13 @@
+diff --git a/crates/honk-ebpf/.cargo/config.toml b/crates/honk-ebpf/.cargo/config.toml
+index 62f9e25..c609e1f 100644
+--- a/crates/honk-ebpf/.cargo/config.toml
++++ b/crates/honk-ebpf/.cargo/config.toml
+@@ -5,7 +5,7 @@ rustflags = [
+   "-C",
+   "llvm-args=-inline-threshold=300",
+   "-C",
+-  "linker=/root/.cargo/bin/bpf-linker-wrapper",
++  "linker=bpf-linker",
+   "-C",
+   "debuginfo=2",
+   "-C",

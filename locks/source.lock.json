@@ -14,7 +14,44 @@
       "sourceLicenseUrl": "https://github.com/Glassyiris/honk/blob/63e271065246bb68ecadf9ae53abecf748806ad3/LICENSE",
       "spdx": "GPL-3.0-only"
     },
-    "patchDigests": [],
+    "patchDigests": [
+      {
+        "path": "honk/patches/100-openwrt-cli-contracts.patch",
+        "sha256": "7337cf12cdc343d38f15089af95c3dc8ee1a2b0d26de313dfd18adeef9ab38b9"
+      },
+      {
+        "path": "honk/patches/110-json-bpf-stats.patch",
+        "sha256": "b09fcc52eeec21c416946a77a5006d6347000031539abc868a0852a9943ab495"
+      },
+      {
+        "path": "honk/patches/115-sampled-bpf-rates.patch",
+        "sha256": "b6577896e32219c963e0803b8d1e6aabba16d0706828d14393e6d37ed3f75dfd"
+      },
+      {
+        "path": "honk/patches/116-possible-cpu-count.patch",
+        "sha256": "0ff7334c1b38c4fd38c52cda74febf3c188312e4260defe292d4fcc65679effb"
+      },
+      {
+        "path": "honk/patches/120-portable-bpf-linker.patch",
+        "sha256": "08d47d0b74321d142dfc2b9459ab7ba67e60c6419152261cc262fa1339c7a745"
+      },
+      {
+        "path": "honk/patches/130-clash-memory-stream.patch",
+        "sha256": "bdc1d65b5655fe6b551a0619bee8610fa3446f2991109648520dceec318988a5"
+      },
+      {
+        "path": "honk/patches/140-subscription-node-groups.patch",
+        "sha256": "e1bf340503ad1fac66aa8829184282488ad04b25cdd89a1b8461b9cb0a4b8ae2"
+      },
+      {
+        "path": "honk/patches/150-primary-node-selection.patch",
+        "sha256": "6b3fe056b3c454fc99b617c8019958ec690358527d630496def4a21b347d5643"
+      },
+      {
+        "path": "honk/patches/160-logging.patch",
+        "sha256": "72a34c083e879bf6211f9df232b87875c8c76054211f848cb3504333a09af84e"
+      }
+    ],
     "provenance": {
       "archiveSource": "GitHub commit archive",
       "observedFrom": "protected local Git object database",

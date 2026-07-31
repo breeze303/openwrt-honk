@@ -21,7 +21,18 @@ must_fail() {
 	printf 'PASS: %s\n' "$name"
 }
 
-must_fail protected-baseline-drift "$repo_root/verify-scope.sh" --compare --baseline /home/breeze/honk-dev/.omo/evidence/honk-openwrt-daemon-luci/01/scope-baseline
+must_pass() {
+	local name=$1
+	shift
+	if ! "$@" >/dev/null 2>&1; then
+		printf 'FAIL: %s unexpectedly failed\n' "$name" >&2
+		return 1
+	fi
+	assertions=$((assertions + 1))
+	printf 'PASS: %s\n' "$name"
+}
+
+must_pass protected-baseline-matches "$repo_root/verify-scope.sh" --compare --baseline /home/breeze/honk-dev/.omo/evidence/honk-openwrt-daemon-luci/01/scope-baseline
 
 fixture_root="$tmp/workspace"
 for checkout in honk luci-app-dae luci-app-homeproxy passwall; do

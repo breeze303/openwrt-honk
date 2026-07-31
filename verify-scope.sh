@@ -72,30 +72,16 @@ case "$mode" in
 		;;
 	compare)
 		[ -n "$baseline" ] || { printf 'compare requires --baseline\n' >&2; exit 64; }
-		if [ -f "$baseline/protected-tree.tar.sha256" ]; then
-			tmp=$(mktemp -d)
-			cleanup() { rm -rf "$tmp"; }
-			trap cleanup EXIT INT TERM
-			capture_fast_aggregate "$tmp"
-			cmp -s "$baseline/protected-tree.tar.sha256" "$tmp/protected-tree.tar.sha256"
-			for checkout in honk luci-app-dae luci-app-homeproxy passwall; do
-				path=$(realpath "$workspace/$checkout")
-				printf '%s\n' "$path" | cmp -s "$baseline/$checkout.canonical-path" -
-				GIT_MASTER=1 git -C "$path" rev-parse HEAD | cmp -s "$baseline/$checkout.head" -
-				GIT_MASTER=1 git -C "$path" status --porcelain=v2 -z | cmp -s "$baseline/$checkout.status.v2.nul" -
-			done
-		else
-			tmp=$(mktemp -d)
-			cleanup() { rm -rf "$tmp"; }
-			trap cleanup EXIT INT TERM
-			capture "$tmp"
-			cmp -s "$baseline/protected-manifest.ndjson0" "$tmp/protected-manifest.ndjson0"
-			for checkout in honk luci-app-dae luci-app-homeproxy passwall; do
-				cmp -s "$baseline/$checkout.canonical-path" "$tmp/$checkout.canonical-path"
-				cmp -s "$baseline/$checkout.head" "$tmp/$checkout.head"
-				cmp -s "$baseline/$checkout.status.v2.nul" "$tmp/$checkout.status.v2.nul"
-			done
-		fi
+		tmp=$(mktemp -d)
+		cleanup() { rm -rf "$tmp"; }
+		trap cleanup EXIT INT TERM
+		capture "$tmp"
+		cmp -s "$baseline/protected-manifest.ndjson0" "$tmp/protected-manifest.ndjson0"
+		for checkout in honk luci-app-dae luci-app-homeproxy passwall; do
+			cmp -s "$baseline/$checkout.canonical-path" "$tmp/$checkout.canonical-path"
+			cmp -s "$baseline/$checkout.head" "$tmp/$checkout.head"
+			cmp -s "$baseline/$checkout.status.v2.nul" "$tmp/$checkout.status.v2.nul"
+		done
 		if "$require_honk_clean"; then require_clean_honk; fi
 		printf 'scope matches baseline\n'
 		;;

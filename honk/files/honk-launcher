@@ -1,0 +1,10 @@
+#!/bin/sh
+
+LOG_DIR=/tmp/honk
+LOG_FILE=$LOG_DIR/honk.log
+
+mkdir -p "$LOG_DIR" || exit 1
+touch "$LOG_FILE" || exit 1
+chmod 640 "$LOG_FILE"
+
+exec /usr/bin/honk-core "$@" >>"$LOG_FILE" 2>&1

@@ -1,0 +1,142 @@
+diff --git a/crates/honk-core/src/control/connection.rs b/crates/honk-core/src/control/connection.rs
+index 399acc1..7ee0062 100644
+--- a/crates/honk-core/src/control/connection.rs
++++ b/crates/honk-core/src/control/connection.rs
+@@ -182,14 +182,13 @@ impl ControlPlaneHandle {
+         }
+     }
+ 
+-    /// Clash mode override (approximate clash semantics), applied after the
+-    /// eBPF handoff / userspace Router produced an outbound and before
+-    /// `resolve_outbound_nodes`:
++    /// Clash mode override, applied after the eBPF handoff / userspace Router
++    /// produced an outbound and before `resolve_outbound_nodes`:
+     ///
+     /// - mode `Direct` forces `direct`;
+-    /// - mode `Global` forces the current GLOBAL selection (a group or node
+-    ///   name, resolved via the normal path; when it resolves to nothing the
+-    ///   original routing result is kept);
++    /// - mode `Rule` keeps direct rules but sends routed proxy traffic to the
++    ///   primary selection;
++    /// - mode `Global` sends all eligible traffic to that same selection;
+     /// - `block` results and `must` results (dae `(must)` rules / eBPF
+     ///   handoff must flag) are never overridden — both are final routing
+     ///   decisions that mode switches must not bypass.
+@@ -201,10 +200,10 @@ impl ControlPlaneHandle {
+             return outbound_name;
+         }
+         let state = { mode_state.read().clone() };
+-        // The GLOBAL selection needs a config lookup to decide whether it
+-        // resolves to a group/node; only do it in Global mode.
++        // The primary selection needs a config lookup to decide whether it
++        // resolves to a group/node. Both Rule and Global use it.
+         let mut selection_resolvable = false;
+-        if state.is_global() && !state.global_selection.is_empty() {
++        if !state.is_direct() && !state.global_selection.is_empty() {
+             let selection = &state.global_selection;
+             selection_resolvable = *selection == "direct" || *selection == "block" || {
+                 let config = self.config.read().await;
+@@ -213,7 +212,7 @@ impl ControlPlaneHandle {
+             };
+             if !selection_resolvable {
+                 debug!(
+-                    "clash Global selection '{}' does not resolve; keeping routed outbound '{}'",
++                    "clash primary selection '{}' does not resolve; keeping routed outbound '{}'",
+                     selection, outbound_name
+                 );
+             }
+@@ -411,9 +410,8 @@ impl ControlPlaneHandle {
+                 .map(|m| (m.rule_type.to_string(), m.rule_payload.to_string()))
+         };
+ 
+-        // Clash mode override (Direct/Global); no-op when the clash API is
+-        // disabled or mode is Rule. Must-rule and block results are never
+-        // overridden.
++        // Clash primary-node override. Direct, must-rule, and block results
++        // retain their dedicated routing semantics.
+         let outbound_name = self.apply_mode_override(outbound_name, must).await;
+ 
+         // For userspace-routed flows with a sniffed domain, write the resolved
+diff --git a/crates/honk-core/src/mode.rs b/crates/honk-core/src/mode.rs
+index 5a270c2..c8e69b3 100644
+--- a/crates/honk-core/src/mode.rs
++++ b/crates/honk-core/src/mode.rs
+@@ -1,7 +1,8 @@
+ //! Shared clash mode state (sing-box `mode` / `StoreMode` equivalent).
+ //!
+ //! Holds the current clash mode (`Rule` / `Global` / `Direct`) and the
+-//! GLOBAL group's current selection. One instance is shared between the
++//! primary node selection exposed through the GLOBAL compatibility group. One
++//! instance is shared between the
+ //! control plane (which applies the mode override on the outbound decision
+ //! path) and the clash API (which reads/writes it via `/configs` and
+ //! `/proxies/GLOBAL`). Values are restored from and persisted to cache.db.
+@@ -13,7 +14,7 @@ use std::sync::Arc;
+ pub struct ModeState {
+     /// Canonical clash mode: `"Rule"` | `"Global"` | `"Direct"`.
+     pub mode: String,
+-    /// Current GLOBAL selection: a group name, a node name, or the virtual
++    /// Current primary selection: a group name, a node name, or the virtual
+     /// `"Proxy"` entry dashboards send for the default selection.
+     pub global_selection: String,
+ }
+@@ -62,10 +63,11 @@ impl ModeState {
+     ///   must rule is an explicit force, neither of which a mode switch
+     ///   may bypass;
+     /// - mode `Direct` forces `direct`;
+-    /// - mode `Global` forces the current GLOBAL selection when it
++    /// - mode `Global` forces the current primary selection when it
+     ///   resolves (`selection_resolvable` — the caller owns the config);
+     ///   an unresolvable selection keeps the routed outbound;
+-    /// - mode `Rule` (or anything else) keeps the routed outbound.
++    /// - mode `Rule` preserves `direct` results and uses the same primary
++    ///   selection for every other routed outbound when it resolves.
+     pub fn override_outbound(
+         &self,
+         outbound_name: &str,
+@@ -81,6 +83,9 @@ impl ModeState {
+         if self.is_global() && !self.global_selection.is_empty() && selection_resolvable {
+             return self.global_selection.clone();
+         }
++        if outbound_name != "direct" && !self.global_selection.is_empty() && selection_resolvable {
++            return self.global_selection.clone();
++        }
+         outbound_name.to_string()
+     }
+ }
+@@ -107,10 +112,14 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn test_override_outbound_rule_mode_keeps_routing() {
++    fn test_override_outbound_rule_mode_uses_primary_for_proxy_routes() {
+         let s = ModeState::new("rule", "proxy");
+-        assert_eq!(s.override_outbound("proxy", false, true), "proxy");
++        assert_eq!(s.override_outbound("routed-proxy", false, true), "proxy");
+         assert_eq!(s.override_outbound("direct", false, true), "direct");
++        assert_eq!(
++            s.override_outbound("routed-proxy", false, false),
++            "routed-proxy"
++        );
+     }
+ 
+     #[test]
+diff --git a/doc/configuration.en.md b/doc/configuration.en.md
+index cacbdc9..16e3d73 100644
+--- a/doc/configuration.en.md
++++ b/doc/configuration.en.md
+@@ -398,6 +398,14 @@ experimental {
+ }
+ ```
+ 
++The `GLOBAL` selector is retained for Clash API compatibility and stores one
++primary node selection. LuCI presents it as the **Primary Node** rather than a
++separate proxy group. In `Rule` mode, explicit `direct`, `block`, and `(must)`
++rules keep their routing semantics; all other proxy routes use the primary
++node. `Global` mode uses that same primary node for every eligible flow, while
++`Direct` forces direct egress. The virtual `Proxy` entry keeps the configured
++routing result until a primary node is selected.
++
+ Useful endpoints: `/proxies`, `/proxies/{name}` (PUT selector), `/proxies/{name}/delay`, `/group/{name}/delay`, `/connections`, `/traffic`, `/logs`, `/dns/query`, `/stats`.
+ 
+ Env: `HONK_UI_DOWNLOAD_URL` overrides the default zashboard zip URL when `external_ui` is empty/missing.
