@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 readonly rust_target=${RUST_TARGET:?RUST_TARGET is required}
 readonly package_arch=${PACKAGE_ARCH:?PACKAGE_ARCH is required}
-readonly stable_toolchain=${RUST_STABLE_TOOLCHAIN:-1.94.1}
+readonly stable_toolchain=${RUST_STABLE_TOOLCHAIN:-1.97.1}
 readonly bpf_toolchain=${BPF_RUST_TOOLCHAIN:-nightly-2026-07-27}
 readonly artifacts_dir=${ARTIFACTS_DIR:-$repo_root/.binary-output}
 readonly work_root=${RUNNER_TEMP:-$repo_root/.cache/work}/honk-system-build-${package_arch}

@@ -39,6 +39,7 @@ grep -F 'BPF_RUST_TOOLCHAIN?=nightly' honk/Makefile >/dev/null
 grep -F 'HONK_USE_PREBUILT' honk/Makefile >/dev/null
 grep -F 'HONK_PREBUILT_DIR?=$(CURDIR)/files/bin' honk/Makefile >/dev/null
 grep -F 'nightly-2026-07-27' .github/workflows/build-honk-binaries.yml >/dev/null
+grep -F 'RUST_STABLE_TOOLCHAIN: 1.97.1' .github/workflows/build-honk-binaries.yml >/dev/null
 grep -F 'openwrt-24.10' .github/workflows/build-packages.yml >/dev/null
 grep -F 'openwrt-25.12' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: ipk' .github/workflows/build-packages.yml >/dev/null
