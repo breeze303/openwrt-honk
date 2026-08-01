@@ -43,6 +43,8 @@ grep -F 'package_ext: apk' .github/workflows/build-packages.yml >/dev/null
 grep -F 'apt-get install -y --no-install-recommends libclang-dev' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package/luci-app-honk/compile' .github/scripts/build-packages-in-sdk.sh >/dev/null
 grep -F 'package/honk/compile' .github/scripts/build-honk-binaries-in-sdk.sh >/dev/null
+grep -F -- '--retry-all-errors' .github/scripts/build-packages-in-sdk.sh >/dev/null
+grep -F -- '--retry-all-errors' .github/scripts/build-honk-binaries-in-sdk.sh >/dev/null
 grep -F 'honk_binaries_' .github/workflows/build-honk-binaries.yml >/dev/null
 grep -F 'rust_target: aarch64-unknown-linux-musl' .github/workflows/build-honk-binaries.yml >/dev/null
 grep -F 'rust_target: x86_64-unknown-linux-musl' .github/workflows/build-honk-binaries.yml >/dev/null

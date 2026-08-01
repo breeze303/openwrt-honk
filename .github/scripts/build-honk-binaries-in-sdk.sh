@@ -19,9 +19,11 @@ export CARGO_HOME="$HOME/.cargo"
 export RUSTUP_HOME="$HOME/.rustup"
 export PATH="$CARGO_HOME/bin:$PATH"
 
+rustup_installer=$(mktemp)
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
-	--location https://sh.rustup.rs \
-	| sh -s -- -y --profile minimal --default-toolchain none
+	--location --retry 5 --retry-all-errors --retry-delay 2 \
+	--output "$rustup_installer" https://sh.rustup.rs
+sh "$rustup_installer" -y --profile minimal --default-toolchain none
 rustup toolchain install "$bpf_toolchain" --profile minimal --component rust-src
 install -m 0755 "$feed_dir/.ci-tools/bpf-linker" "$CARGO_HOME/bin/bpf-linker"
 
