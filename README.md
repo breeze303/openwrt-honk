@@ -47,18 +47,20 @@ tests/                 Focused packaging and integration checks
 
 ## Requirements
 
-The package recipe supports x86_64 and aarch64 targets. The buildroot needs:
+The fast package path supports x86_64 and aarch64 targets. It needs an OpenWrt SDK plus the feeds that provide v2ray-geoip, v2ray-geosite, kmod-sched-core, kmod-sched-bpf, and kmod-veth. Rust is not installed in the SDK container on this path.
 
-- OpenWrt buildroot and the packages feed Rust host support
-- Rust nightly with rust-src
-- bpf-linker, LLVM/libclang, CMake, and a target musl linker
-- v2ray-geoip, v2ray-geosite, kmod-sched-core, kmod-sched-bpf, and kmod-veth
-
-The build compiles the userspace binaries and the BTF-enabled eBPF object. It does not use prebuilt Honk binaries.
+The separate binary build runs on a standard Linux host with Rust stable, Rust nightly with rust-src, bpf-linker, LLVM/libclang, CMake, and Zig 0.14.1. It produces static musl binaries with the BTF-enabled eBPF object embedded. When no binaries are staged under `honk/files/bin/`, the package recipe retains its source-build fallback and requires the original Rust OpenWrt toolchain.
 
 ## Build
 
-Install this checkout as an OpenWrt feed or place the package directories in the buildroot, then refresh feeds and select both packages:
+Download and verify the matching static binary release before running the fast package build. GitHub Actions performs this step automatically; locally, run one of:
+
+~~~sh
+PACKAGE_ARCH=x86_64 .github/scripts/download-honk-binaries.sh
+PACKAGE_ARCH=aarch64 .github/scripts/download-honk-binaries.sh
+~~~
+
+Then install this checkout as an OpenWrt feed or place the package directories in the buildroot, refresh feeds, and select both packages:
 
 ~~~sh
 ./scripts/feeds update honk
@@ -80,14 +82,14 @@ The generated LuCI assets are committed below luci-app-honk/root/www/luci-static
 
 ### GitHub Actions
 
-The `Build packages` workflow runs after package or dashboard changes are pushed to `master`, and can also be started manually from the Actions page. It builds:
+The `Build Honk binaries` workflow compiles Honk directly on standard Linux runners. Its two parallel jobs use Zig to cross-compile static musl binaries for x86_64 and aarch64; no OpenWrt SDK is involved. Each architecture archive contains `honk-core`, `honk-tool`, a manifest, and checksums.
+
+After a binary release succeeds, `Build packages` downloads and verifies the matching archive, then starts the OpenWrt SDK matrix. LuCI-only changes reuse the existing binary release. The matrix builds:
 
 - IPK packages for OpenWrt 24.10 on x86_64 and aarch64_generic.
 - APK packages for OpenWrt 25.12 on x86_64 and aarch64_generic.
 
-Each matrix job uploads `honk` and `luci-app-honk` as a workflow artifact. After all four builds pass, the workflow publishes the same files in a versioned GitHub Release. The architecture and SDK are appended to release filenames so LuCI's architecture-independent package is still easy to identify.
-
-The separate `Build Honk binaries` workflow runs only when the pinned Honk source, OpenWrt patches, or its own build definition changes. It publishes versioned archives containing `honk-core`, `honk-tool`, a manifest, and checksums for all four architecture/SDK combinations. These archives are intended as the input for fast package-only builds that do not rebuild Rust after LuCI-only changes.
+Each matrix job only packages the staged binaries, service files, and LuCI assets; it does not compile Rust or eBPF. It uploads `honk` and `luci-app-honk` as workflow artifacts. After all four builds pass, the workflow publishes the same files in a versioned GitHub Release. The architecture and SDK are appended to release filenames so LuCI's architecture-independent package is still easy to identify.
 
 ## Install
 

@@ -6,11 +6,13 @@ on:
     branches:
       - master
     paths:
-      - .github/scripts/build-honk-binaries-in-sdk.sh
+      - .github/scripts/build-honk-binaries.sh
       - .github/workflows/build-honk-binaries.yml
       - honk/Makefile
       - honk/source.mk
       - honk/patches/**
+      - locks/source.lock.json
+      - locks/toolchains.lock.json
 
 permissions:
   contents: read
@@ -23,6 +25,7 @@ env:
   BPF_LINKER_VERSION: 0.10.4
   BPF_LINKER_SHA256: 4dda77daab6c5f120a468e6d3ede2498f5bd47ece712172cfb7290176d93d015
   BPF_RUST_TOOLCHAIN: nightly-2026-07-27
+  RUST_STABLE_TOOLCHAIN: 1.94.1
 
 jobs:
   prepare:
@@ -54,76 +57,66 @@ jobs:
           } >>"$GITHUB_OUTPUT"
 
   build:
-    name: Build ${{ matrix.arch }} / ${{ matrix.sdk }}
+    name: Build ${{ matrix.package_arch }} static binary
     needs: prepare
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: x86_64
-            sdk: openwrt-24.10
+          - package_arch: x86_64
             rust_target: x86_64-unknown-linux-musl
-          - arch: aarch64_generic
-            sdk: openwrt-24.10
-            rust_target: aarch64-unknown-linux-musl
-          - arch: x86_64
-            sdk: openwrt-25.12
-            rust_target: x86_64-unknown-linux-musl
-          - arch: aarch64_generic
-            sdk: openwrt-25.12
+          - package_arch: aarch64
             rust_target: aarch64-unknown-linux-musl
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
 
-      - name: Download eBPF linker
+      - name: Install system dependencies
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y zstd
-          archive=$(mktemp)
-          url="https://github.com/aya-rs/bpf-linker/releases/download/v${BPF_LINKER_VERSION}/bpf-linker-x86_64-unknown-linux-musl.tar.zst"
-          curl --fail --location --retry 3 --output "$archive" "$url"
-          echo "${BPF_LINKER_SHA256}  ${archive}" | sha256sum -c -
-          mkdir -p .ci-tools
-          tar --zstd -xf "$archive" -C .ci-tools
-          test -x .ci-tools/bpf-linker
+          sudo apt-get install -y clang llvm libbpf-dev pkg-config cmake libclang-dev zstd
 
-      - name: Build Honk in OpenWrt SDK
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      - name: Download eBPF linker
         shell: bash
-        env:
-          RUST_TARGET: ${{ matrix.rust_target }}
-          SDK_IMAGE: ghcr.io/openwrt/sdk:${{ matrix.arch }}-${{ matrix.sdk }}
         run: |
           set -euo pipefail
-          mkdir -p .binary-output
-          sudo chown 1000:1000 .binary-output
-          docker run --rm \
-            --user root \
-            --env BPF_RUST_TOOLCHAIN \
-            --env RUST_TARGET \
-            --volume "$GITHUB_WORKSPACE:/feed:ro" \
-            --volume "$GITHUB_WORKSPACE/.binary-output:/artifacts" \
-            "$SDK_IMAGE" \
-            bash -lc '
-              set -euo pipefail
-              apt-get update
-              apt-get install -y --no-install-recommends libclang-dev
-              exec runuser --user buildbot -- \
-                env BPF_RUST_TOOLCHAIN="$BPF_RUST_TOOLCHAIN" \
-                    RUST_TARGET="$RUST_TARGET" \
-                bash /feed/.github/scripts/build-honk-binaries-in-sdk.sh
-            '
-          sudo chown -R "$(id -u):$(id -g)" .binary-output
+          archive=$(mktemp)
+          url="https://github.com/aya-rs/bpf-linker/releases/download/v${BPF_LINKER_VERSION}/bpf-linker-x86_64-unknown-linux-musl.tar.zst"
+          curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 --output "$archive" "$url"
+          echo "${BPF_LINKER_SHA256}  ${archive}" | sha256sum -c -
+          mkdir -p "$HOME/.cargo/bin"
+          tar --zstd -xf "$archive" -C "$HOME/.cargo/bin"
+          bpf-linker --version
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: honk-cargo-${{ runner.os }}-${{ matrix.rust_target }}-${{ hashFiles('honk/source.mk', 'honk/patches/*.patch', 'locks/toolchains.lock.json') }}
+
+      - name: Build static Honk binaries
+        shell: bash
+        env:
+          ARTIFACTS_DIR: ${{ github.workspace }}/.binary-output
+          PACKAGE_ARCH: ${{ matrix.package_arch }}
+          RUST_TARGET: ${{ matrix.rust_target }}
+        run: bash .github/scripts/build-honk-binaries.sh
 
       - name: Package binaries
         shell: bash
         env:
-          ARCH: ${{ matrix.arch }}
-          SDK: ${{ matrix.sdk }}
+          ARCH: ${{ matrix.package_arch }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
@@ -132,16 +125,13 @@ jobs:
           mkdir -p dist/stage
           install -m 0755 .binary-output/honk-core dist/stage/honk-core
           install -m 0755 .binary-output/honk-tool dist/stage/honk-tool
-          sha256sum dist/stage/honk-core dist/stage/honk-tool \
-            | sed 's#dist/stage/##' >dist/stage/SHA256SUMS
-          jq -n \
-            --arg version "$VERSION" \
-            --arg arch "$ARCH" \
-            --arg sdk "$SDK" \
-            --arg commit "$GITHUB_SHA" \
-            '{version:$version, architecture:$arch, sdk:$sdk, repositoryCommit:$commit}' \
-            >dist/stage/manifest.json
-          archive="honk-${VERSION}-${ARCH}-${SDK}.tar.gz"
+          install -m 0644 .binary-output/build-manifest.json dist/stage/manifest.json
+          jq --arg version "$VERSION" --arg commit "$GITHUB_SHA" \
+            '. + {version:$version, repositoryCommit:$commit}' \
+            dist/stage/manifest.json >dist/stage/manifest.tmp
+          mv dist/stage/manifest.tmp dist/stage/manifest.json
+          (cd dist/stage && sha256sum honk-core honk-tool >SHA256SUMS)
+          archive="honk-${VERSION}-${ARCH}.tar.gz"
           tar -C dist/stage -czf "dist/$archive" .
           (cd dist && sha256sum "$archive" >"$archive.sha256")
           ls -lh dist/*.tar.gz dist/*.sha256
@@ -149,7 +139,7 @@ jobs:
       - name: Upload binary artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: honk-binaries-${{ matrix.arch }}-${{ matrix.sdk }}
+          name: honk-binaries-${{ matrix.package_arch }}
           path: |
             dist/*.tar.gz
             dist/*.sha256

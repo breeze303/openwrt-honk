@@ -2,50 +2,63 @@ name: Build packages
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Build Honk binaries
+    types:
+      - completed
+    branches:
+      - master
   push:
     branches:
       - master
     paths:
-      - .github/scripts/build-packages-in-sdk.sh
-      - .github/workflows/build-packages.yml
-      - honk/**
+      - honk/files/**
       - luci-app-honk/**
 
 permissions:
   contents: read
 
 concurrency:
-  group: packages-${{ github.ref }}
+  group: packages-${{ github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: true
-
-env:
-  BPF_LINKER_VERSION: 0.10.4
-  BPF_LINKER_SHA256: 4dda77daab6c5f120a468e6d3ede2498f5bd47ece712172cfb7290176d93d015
-  BPF_RUST_TOOLCHAIN: nightly-2026-07-27
 
 jobs:
   prepare:
     name: Prepare version
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     outputs:
+      binary_release_tag: ${{ steps.meta.outputs.binary_release_tag }}
+      checkout_ref: ${{ steps.meta.outputs.checkout_ref }}
       release_name: ${{ steps.meta.outputs.release_name }}
       release_tag: ${{ steps.meta.outputs.release_tag }}
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Generate version metadata
         id: meta
         shell: bash
+        env:
+          CHECKOUT_REF: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
           pkg_version=$(sed -n 's/^PKG_VERSION:=//p' honk/Makefile | head -n 1)
           pkg_release=$(sed -n 's/^PKG_RELEASE:=//p' honk/Makefile | head -n 1)
           source_revision=$(sed -n 's/^PKG_SOURCE_VERSION:=//p' honk/source.mk | head -n 1)
           short_revision=${source_revision:0:7}
-          release="honk_${pkg_version}-r${pkg_release}_${short_revision}"
-          echo "release_name=$release" >>"$GITHUB_OUTPUT"
-          echo "release_tag=$release" >>"$GITHUB_OUTPUT"
+          version="${pkg_version}-r${pkg_release}_${short_revision}"
+          {
+            echo "binary_release_tag=honk_binaries_${version}"
+            echo "checkout_ref=$CHECKOUT_REF"
+            echo "release_name=honk_${version}"
+            echo "release_tag=honk_${version}"
+            echo "version=$version"
+          } >>"$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.arch }} / ${{ matrix.sdk }}
@@ -56,35 +69,36 @@ jobs:
       matrix:
         include:
           - arch: x86_64
+            binary_arch: x86_64
             sdk: openwrt-24.10
             package_ext: ipk
           - arch: aarch64_generic
+            binary_arch: aarch64
             sdk: openwrt-24.10
             package_ext: ipk
           - arch: x86_64
+            binary_arch: x86_64
             sdk: openwrt-25.12
             package_ext: apk
           - arch: aarch64_generic
+            binary_arch: aarch64
             sdk: openwrt-25.12
             package_ext: apk
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
 
-      - name: Download eBPF linker
+      - name: Download prebuilt Honk binaries
         shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y zstd
-          archive=$(mktemp)
-          url="https://github.com/aya-rs/bpf-linker/releases/download/v${BPF_LINKER_VERSION}/bpf-linker-x86_64-unknown-linux-musl.tar.zst"
-          curl --fail --location --retry 3 --output "$archive" "$url"
-          echo "${BPF_LINKER_SHA256}  ${archive}" | sha256sum -c -
-          mkdir -p .ci-tools
-          tar --zstd -xf "$archive" -C .ci-tools
-          test -x .ci-tools/bpf-linker
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HONK_BINARY_RELEASE_TAG: ${{ needs.prepare.outputs.binary_release_tag }}
+          HONK_BINARY_VERSION: ${{ needs.prepare.outputs.version }}
+          PACKAGE_ARCH: ${{ matrix.binary_arch }}
+        run: bash .github/scripts/download-honk-binaries.sh
 
       - name: Build packages in OpenWrt SDK
         shell: bash
@@ -95,19 +109,11 @@ jobs:
           mkdir -p .build-output
           sudo chown 1000:1000 .build-output
           docker run --rm \
-            --user root \
-            --env BPF_RUST_TOOLCHAIN \
+            --user buildbot \
             --volume "$GITHUB_WORKSPACE:/feed:ro" \
             --volume "$GITHUB_WORKSPACE/.build-output:/artifacts" \
             "$SDK_IMAGE" \
-            bash -lc '
-              set -euo pipefail
-              apt-get update
-              apt-get install -y --no-install-recommends libclang-dev
-              exec runuser --user buildbot -- \
-                env BPF_RUST_TOOLCHAIN="$BPF_RUST_TOOLCHAIN" \
-                bash /feed/.github/scripts/build-packages-in-sdk.sh
-            '
+            bash /feed/.github/scripts/build-packages-in-sdk.sh
           sudo chown -R "$(id -u):$(id -g)" .build-output
 
       - name: Prepare artifacts
@@ -164,6 +170,6 @@ jobs:
         with:
           tag_name: ${{ needs.prepare.outputs.release_tag }}
           name: ${{ needs.prepare.outputs.release_name }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ needs.prepare.outputs.checkout_ref }}
           generate_release_notes: true
           files: release-assets/*

@@ -32,22 +32,36 @@ grep -F 'outbound_name != "direct" && !self.global_selection.is_empty() && selec
 
 sh -n honk/files/honk.init
 sh -n honk/files/honk-launcher
-sh -n .github/scripts/build-packages-in-sdk.sh
-sh -n .github/scripts/build-honk-binaries-in-sdk.sh
+bash -n .github/scripts/build-packages-in-sdk.sh
+bash -n .github/scripts/build-honk-binaries.sh
+bash -n .github/scripts/download-honk-binaries.sh
 grep -F 'BPF_RUST_TOOLCHAIN?=nightly' honk/Makefile >/dev/null
-grep -F 'nightly-2026-07-27' .github/workflows/build-packages.yml >/dev/null
+grep -F 'HONK_USE_PREBUILT' honk/Makefile >/dev/null
+grep -F 'HONK_PREBUILT_DIR?=$(CURDIR)/files/bin' honk/Makefile >/dev/null
+grep -F 'nightly-2026-07-27' .github/workflows/build-honk-binaries.yml >/dev/null
 grep -F 'openwrt-24.10' .github/workflows/build-packages.yml >/dev/null
 grep -F 'openwrt-25.12' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: ipk' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: apk' .github/workflows/build-packages.yml >/dev/null
-grep -F 'apt-get install -y --no-install-recommends libclang-dev' .github/workflows/build-packages.yml >/dev/null
+grep -F 'workflow_run:' .github/workflows/build-packages.yml >/dev/null
+grep -F 'Download prebuilt Honk binaries' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package/luci-app-honk/compile' .github/scripts/build-packages-in-sdk.sh >/dev/null
-grep -F 'package/honk/compile' .github/scripts/build-honk-binaries-in-sdk.sh >/dev/null
-grep -F -- '--retry-all-errors' .github/scripts/build-packages-in-sdk.sh >/dev/null
-grep -F -- '--retry-all-errors' .github/scripts/build-honk-binaries-in-sdk.sh >/dev/null
+grep -F -- '--profile release-musl' .github/scripts/build-honk-binaries.sh >/dev/null
+grep -F 'ZIGCC_TARGET' .github/scripts/build-honk-binaries.sh >/dev/null
+grep -F "grep -q 'INTERP'" .github/scripts/build-honk-binaries.sh >/dev/null
+grep -F -- '--retry-all-errors' .github/scripts/download-honk-binaries.sh >/dev/null
 grep -F 'honk_binaries_' .github/workflows/build-honk-binaries.yml >/dev/null
 grep -F 'rust_target: aarch64-unknown-linux-musl' .github/workflows/build-honk-binaries.yml >/dev/null
 grep -F 'rust_target: x86_64-unknown-linux-musl' .github/workflows/build-honk-binaries.yml >/dev/null
+test "$(grep -c 'rust_target:' .github/workflows/build-honk-binaries.yml)" -eq 2
+if grep -Eq 'docker run|openwrt-[0-9]' .github/workflows/build-honk-binaries.yml; then
+	echo 'binary workflow must build independently from OpenWrt SDKs' >&2
+	exit 1
+fi
+if grep -Eq 'rustup|cargo|bpf-linker|libclang' .github/scripts/build-packages-in-sdk.sh .github/workflows/build-packages.yml; then
+	echo 'package workflow must only stage prebuilt Honk binaries' >&2
+	exit 1
+fi
 grep -F 'LAUNCHER=/usr/libexec/honk/honk-launcher' honk/files/honk.init >/dev/null
 grep -F '>>"$LOG_FILE" 2>&1' honk/files/honk-launcher >/dev/null
 if grep -Eq 'procd_set_param (stdout|stderr)' honk/files/honk.init; then

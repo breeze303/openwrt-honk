@@ -8,6 +8,7 @@ sdk/
 target/
 tmp/
 tmpfs-secrets/
+honk/files/bin/
 *.apk
 *.ipk
 *.tar

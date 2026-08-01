@@ -47,18 +47,20 @@ tests/                 打包和集成检查
 
 ## 构建要求
 
-软件包配方支持 x86_64 和 aarch64。构建环境需要：
+快速打包流程支持 x86_64 和 aarch64。SDK 阶段只需要 OpenWrt SDK，以及提供 v2ray-geoip、v2ray-geosite、kmod-sched-core、kmod-sched-bpf、kmod-veth 的 feeds；该阶段不再安装 Rust。
 
-- OpenWrt buildroot 以及 packages feed 的 Rust 主机支持
-- Rust nightly 和 rust-src
-- bpf-linker、LLVM/libclang、CMake、目标 musl 链接器
-- v2ray-geoip、v2ray-geosite、kmod-sched-core、kmod-sched-bpf、kmod-veth
-
-构建会编译用户态程序和带 BTF 的 eBPF 对象，不使用预编译 Honk 二进制文件。
+独立的二进制构建在标准 Linux 环境中运行，需要 Rust stable、带 rust-src 的 Rust nightly、bpf-linker、LLVM/libclang、CMake 和 Zig 0.14.1。它会生成静态 musl 程序，并嵌入带 BTF 的 eBPF 对象。`honk/files/bin/` 中没有成品时，软件包配方仍保留原来的源码构建路径，此时需要 OpenWrt Rust 工具链。
 
 ## 构建
 
-将本仓库作为 feed 安装，或把软件包目录放入 buildroot，然后刷新 feed 并在 menuconfig 中选择两个软件包：
+快速打包前先下载并校验对应架构的静态成品。GitHub Actions 会自动执行；本地可以运行：
+
+~~~sh
+PACKAGE_ARCH=x86_64 .github/scripts/download-honk-binaries.sh
+PACKAGE_ARCH=aarch64 .github/scripts/download-honk-binaries.sh
+~~~
+
+然后将本仓库作为 feed 安装，或把软件包目录放入 buildroot，刷新 feed 并在 menuconfig 中选择两个软件包：
 
 ~~~sh
 ./scripts/feeds update honk
@@ -80,14 +82,14 @@ npm run build
 
 ### GitHub Actions
 
-`Build packages` 工作流会在软件包或管理界面变更推送到 `master` 后运行，也可以在 Actions 页面手动触发。构建矩阵包括：
+`Build Honk binaries` 工作流直接在标准 Linux Runner 上编译 Honk。两个并行任务通过 Zig 分别生成 x86_64 和 aarch64 的静态 musl 成品，全程不使用 OpenWrt SDK。每个架构归档包含 `honk-core`、`honk-tool`、构建清单和校验文件。
+
+二进制发布成功后，`Build packages` 会下载并校验对应归档，再启动 OpenWrt SDK 矩阵。只修改 LuCI 时会复用现有二进制发布。构建矩阵包括：
 
 - OpenWrt 24.10：x86_64 和 aarch64_generic 的 IPK。
 - OpenWrt 25.12：x86_64 和 aarch64_generic 的 APK。
 
-每个矩阵任务会上传 `honk` 和 `luci-app-honk` 两个工作流产物。四组构建全部通过后，同一批文件会发布到带版本号的 GitHub Release。发布文件名会追加架构和 SDK，便于区分 LuCI 的全架构软件包。
-
-独立的 `Build Honk binaries` 工作流只在固定的 Honk 源码、OpenWrt 补丁或其构建定义变化时运行。它会为四种架构/SDK 组合发布带版本号的归档，内容包括 `honk-core`、`honk-tool`、构建清单和校验值。这些归档可供后续的快速打包流程使用，单独修改 LuCI 时无需再次编译 Rust。
+每个矩阵任务只封装已下载的二进制、服务文件和 LuCI 资源，不再编译 Rust 或 eBPF，并上传 `honk` 和 `luci-app-honk` 两个工作流产物。四组构建全部通过后，同一批文件会发布到带版本号的 GitHub Release。发布文件名会追加架构和 SDK，便于区分 LuCI 的全架构软件包。
 
 ## 安装
 
