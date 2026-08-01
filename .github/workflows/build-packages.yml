@@ -95,12 +95,19 @@ jobs:
           mkdir -p .build-output
           sudo chown 1000:1000 .build-output
           docker run --rm \
-            --user 1000:1000 \
+            --user root \
             --env BPF_RUST_TOOLCHAIN \
             --volume "$GITHUB_WORKSPACE:/feed:ro" \
             --volume "$GITHUB_WORKSPACE/.build-output:/artifacts" \
             "$SDK_IMAGE" \
-            bash /feed/.github/scripts/build-packages-in-sdk.sh
+            bash -lc '
+              set -euo pipefail
+              apt-get update
+              apt-get install -y --no-install-recommends libclang-dev
+              exec runuser --user buildbot -- \
+                env BPF_RUST_TOOLCHAIN="$BPF_RUST_TOOLCHAIN" \
+                bash /feed/.github/scripts/build-packages-in-sdk.sh
+            '
           sudo chown -R "$(id -u):$(id -g)" .build-output
 
       - name: Prepare artifacts

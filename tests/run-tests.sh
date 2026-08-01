@@ -39,6 +39,7 @@ grep -F 'openwrt-24.10' .github/workflows/build-packages.yml >/dev/null
 grep -F 'openwrt-25.12' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: ipk' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: apk' .github/workflows/build-packages.yml >/dev/null
+grep -F 'apt-get install -y --no-install-recommends libclang-dev' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package/luci-app-honk/compile' .github/scripts/build-packages-in-sdk.sh >/dev/null
 grep -F 'LAUNCHER=/usr/libexec/honk/honk-launcher' honk/files/honk.init >/dev/null
 grep -F '>>"$LOG_FILE" 2>&1' honk/files/honk-launcher >/dev/null
