@@ -33,6 +33,7 @@ grep -F 'outbound_name != "direct" && !self.global_selection.is_empty() && selec
 sh -n honk/files/honk.init
 sh -n honk/files/honk-launcher
 sh -n .github/scripts/build-packages-in-sdk.sh
+sh -n .github/scripts/build-honk-binaries-in-sdk.sh
 grep -F 'BPF_RUST_TOOLCHAIN?=nightly' honk/Makefile >/dev/null
 grep -F 'nightly-2026-07-27' .github/workflows/build-packages.yml >/dev/null
 grep -F 'openwrt-24.10' .github/workflows/build-packages.yml >/dev/null
@@ -41,6 +42,10 @@ grep -F 'package_ext: ipk' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: apk' .github/workflows/build-packages.yml >/dev/null
 grep -F 'apt-get install -y --no-install-recommends libclang-dev' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package/luci-app-honk/compile' .github/scripts/build-packages-in-sdk.sh >/dev/null
+grep -F 'package/honk/compile' .github/scripts/build-honk-binaries-in-sdk.sh >/dev/null
+grep -F 'honk_binaries_' .github/workflows/build-honk-binaries.yml >/dev/null
+grep -F 'rust_target: aarch64-unknown-linux-musl' .github/workflows/build-honk-binaries.yml >/dev/null
+grep -F 'rust_target: x86_64-unknown-linux-musl' .github/workflows/build-honk-binaries.yml >/dev/null
 grep -F 'LAUNCHER=/usr/libexec/honk/honk-launcher' honk/files/honk.init >/dev/null
 grep -F '>>"$LOG_FILE" 2>&1' honk/files/honk-launcher >/dev/null
 if grep -Eq 'procd_set_param (stdout|stderr)' honk/files/honk.init; then

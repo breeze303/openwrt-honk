@@ -87,6 +87,8 @@ npm run build
 
 每个矩阵任务会上传 `honk` 和 `luci-app-honk` 两个工作流产物。四组构建全部通过后，同一批文件会发布到带版本号的 GitHub Release。发布文件名会追加架构和 SDK，便于区分 LuCI 的全架构软件包。
 
+独立的 `Build Honk binaries` 工作流只在固定的 Honk 源码、OpenWrt 补丁或其构建定义变化时运行。它会为四种架构/SDK 组合发布带版本号的归档，内容包括 `honk-core`、`honk-tool`、构建清单和校验值。这些归档可供后续的快速打包流程使用，单独修改 LuCI 时无需再次编译 Rust。
+
 ## 安装
 
 先安装 honk，再安装 luci-app-honk。根据目标系统使用对应的软件包管理器：

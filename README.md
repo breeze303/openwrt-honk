@@ -87,6 +87,8 @@ The `Build packages` workflow runs after package or dashboard changes are pushed
 
 Each matrix job uploads `honk` and `luci-app-honk` as a workflow artifact. After all four builds pass, the workflow publishes the same files in a versioned GitHub Release. The architecture and SDK are appended to release filenames so LuCI's architecture-independent package is still easy to identify.
 
+The separate `Build Honk binaries` workflow runs only when the pinned Honk source, OpenWrt patches, or its own build definition changes. It publishes versioned archives containing `honk-core`, `honk-tool`, a manifest, and checksums for all four architecture/SDK combinations. These archives are intended as the input for fast package-only builds that do not rebuild Rust after LuCI-only changes.
+
 ## Install
 
 Build or download both packages, install honk first, then luci-app-honk. Use the package manager provided by the target image:
