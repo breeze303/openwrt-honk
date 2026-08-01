@@ -78,6 +78,15 @@ npm run build
 
 生成的 LuCI 资源提交在 luci-app-honk/root/www/luci-static/resources/honk/app/。
 
+### GitHub Actions
+
+`Build packages` 工作流会在软件包或管理界面变更推送到 `master` 后运行，也可以在 Actions 页面手动触发。构建矩阵包括：
+
+- OpenWrt 24.10：x86_64 和 aarch64_generic 的 IPK。
+- OpenWrt 25.12：x86_64 和 aarch64_generic 的 APK。
+
+每个矩阵任务会上传 `honk` 和 `luci-app-honk` 两个工作流产物。四组构建全部通过后，同一批文件会发布到带版本号的 GitHub Release。发布文件名会追加架构和 SDK，便于区分 LuCI 的全架构软件包。
+
 ## 安装
 
 先安装 honk，再安装 luci-app-honk。根据目标系统使用对应的软件包管理器：

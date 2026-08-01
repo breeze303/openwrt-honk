@@ -78,6 +78,15 @@ npm run build
 
 The generated LuCI assets are committed below luci-app-honk/root/www/luci-static/resources/honk/app/.
 
+### GitHub Actions
+
+The `Build packages` workflow runs after package or dashboard changes are pushed to `master`, and can also be started manually from the Actions page. It builds:
+
+- IPK packages for OpenWrt 24.10 on x86_64 and aarch64_generic.
+- APK packages for OpenWrt 25.12 on x86_64 and aarch64_generic.
+
+Each matrix job uploads `honk` and `luci-app-honk` as a workflow artifact. After all four builds pass, the workflow publishes the same files in a versioned GitHub Release. The architecture and SDK are appended to release filenames so LuCI's architecture-independent package is still easy to identify.
+
 ## Install
 
 Build or download both packages, install honk first, then luci-app-honk. Use the package manager provided by the target image:

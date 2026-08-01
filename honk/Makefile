@@ -41,8 +41,9 @@ define Package/honk/conffiles
 endef
 
 RUST_TARGET:=$(RUSTC_TARGET_ARCH)
-BPF_CARGO?=rustup run nightly cargo
-BPF_RUSTC?=$(shell rustup which --toolchain nightly rustc 2>/dev/null)
+BPF_RUST_TOOLCHAIN?=nightly
+BPF_CARGO?=rustup run $(BPF_RUST_TOOLCHAIN) cargo
+BPF_RUSTC?=$(shell rustup which --toolchain $(BPF_RUST_TOOLCHAIN) rustc 2>/dev/null)
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
@@ -55,7 +56,7 @@ define Build/Compile
 	+cd $(PKG_BUILD_DIR)/crates/honk-ebpf && \
 		CARGO_HOME=$(CARGO_HOME) \
 		RUSTC=$(BPF_RUSTC) \
-		RUSTUP_TOOLCHAIN=nightly \
+		RUSTUP_TOOLCHAIN=$(BPF_RUST_TOOLCHAIN) \
 		$(BPF_CARGO) build --locked --release -Zbuild-std=core --target bpfel-unknown-none
 	+cd $(PKG_BUILD_DIR) && \
 		$(CARGO_PKG_CONFIG_VARS) \

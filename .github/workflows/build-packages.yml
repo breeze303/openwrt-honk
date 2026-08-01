@@ -1,0 +1,162 @@
+name: Build packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/scripts/build-packages-in-sdk.sh
+      - .github/workflows/build-packages.yml
+      - honk/**
+      - luci-app-honk/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BPF_LINKER_VERSION: 0.10.4
+  BPF_LINKER_SHA256: 4dda77daab6c5f120a468e6d3ede2498f5bd47ece712172cfb7290176d93d015
+  BPF_RUST_TOOLCHAIN: nightly-2026-07-27
+
+jobs:
+  prepare:
+    name: Prepare version
+    runs-on: ubuntu-24.04
+    outputs:
+      release_name: ${{ steps.meta.outputs.release_name }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Generate version metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg_version=$(sed -n 's/^PKG_VERSION:=//p' honk/Makefile | head -n 1)
+          pkg_release=$(sed -n 's/^PKG_RELEASE:=//p' honk/Makefile | head -n 1)
+          source_revision=$(sed -n 's/^PKG_SOURCE_VERSION:=//p' honk/source.mk | head -n 1)
+          short_revision=${source_revision:0:7}
+          release="honk_${pkg_version}-r${pkg_release}_${short_revision}"
+          echo "release_name=$release" >>"$GITHUB_OUTPUT"
+          echo "release_tag=$release" >>"$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.arch }} / ${{ matrix.sdk }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            sdk: openwrt-24.10
+            package_ext: ipk
+          - arch: aarch64_generic
+            sdk: openwrt-24.10
+            package_ext: ipk
+          - arch: x86_64
+            sdk: openwrt-25.12
+            package_ext: apk
+          - arch: aarch64_generic
+            sdk: openwrt-25.12
+            package_ext: apk
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Download eBPF linker
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zstd
+          archive=$(mktemp)
+          url="https://github.com/aya-rs/bpf-linker/releases/download/v${BPF_LINKER_VERSION}/bpf-linker-x86_64-unknown-linux-musl.tar.zst"
+          curl --fail --location --retry 3 --output "$archive" "$url"
+          echo "${BPF_LINKER_SHA256}  ${archive}" | sha256sum -c -
+          mkdir -p .ci-tools
+          tar --zstd -xf "$archive" -C .ci-tools
+          test -x .ci-tools/bpf-linker
+
+      - name: Build packages in OpenWrt SDK
+        shell: bash
+        env:
+          SDK_IMAGE: ghcr.io/openwrt/sdk:${{ matrix.arch }}-${{ matrix.sdk }}
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output
+          sudo chown 1000:1000 .build-output
+          docker run --rm \
+            --user 1000:1000 \
+            --env BPF_RUST_TOOLCHAIN \
+            --volume "$GITHUB_WORKSPACE:/feed:ro" \
+            --volume "$GITHUB_WORKSPACE/.build-output:/artifacts" \
+            "$SDK_IMAGE" \
+            bash /feed/.github/scripts/build-packages-in-sdk.sh
+          sudo chown -R "$(id -u):$(id -g)" .build-output
+
+      - name: Prepare artifacts
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_EXT: ${{ matrix.package_ext }}
+          SDK: ${{ matrix.sdk }}
+        run: |
+          set -euo pipefail
+          package_dir=".build-output/bin/packages/${ARCH}/honk_ci"
+          mkdir -p dist
+          shopt -s nullglob
+          packages=(
+            "$package_dir"/honk[-_]*."$PACKAGE_EXT"
+            "$package_dir"/luci-app-honk[-_]*."$PACKAGE_EXT"
+          )
+          if [ "${#packages[@]}" -ne 2 ]; then
+            echo "Expected honk and luci-app-honk packages in $package_dir" >&2
+            find .build-output/bin/packages -type f -print || true
+            exit 1
+          fi
+          for package in "${packages[@]}"; do
+            base=$(basename "$package" ".$PACKAGE_EXT")
+            cp "$package" "dist/${base}-${ARCH}-${SDK}.${PACKAGE_EXT}"
+          done
+          ls -lah dist
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: honk-${{ matrix.arch }}-${{ matrix.sdk }}-${{ matrix.package_ext }}
+          path: dist/*.${{ matrix.package_ext }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish release
+    needs:
+      - prepare
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.release_tag }}
+          name: ${{ needs.prepare.outputs.release_name }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: release-assets/*
