@@ -4,12 +4,13 @@ English | [简体中文](README.zh-CN.md)
 
 This repository packages [Honk](https://github.com/Glassyiris/honk), a Rust/eBPF transparent proxy engine, for OpenWrt together with a native LuCI management interface.
 
-The feed contains two packages:
+The feed contains three packages:
 
 - honk: honk-core, honk-tool, the procd service, default configuration, eBPF assets, and runtime logging.
-- luci-app-honk: the authenticated LuCI controller, RPC bridge, configuration editor, node and subscription management, runtime dashboard, traffic view, and logs.
+- luci-app-honk: the new standalone LuCI controller, mode/DNS generator, node and device workflow, diagnostics, and dashboard.
+- luci-app-honk-legacy: the preserved legacy LuCI dashboard for rollback and migration reference. It uses its own controller, ACL, menu, API, and static namespace.
 
-The upstream source is pinned to commit 63e271065246bb68ecadf9ae53abecf748806ad3 (v0.0.1.beta.25). The package currently targets OpenWrt x86_64 and aarch64.
+Builds use the exact upstream commit recorded in `locks/source.lock.json`. The package currently targets OpenWrt x86_64 and aarch64. A scheduled workflow checks Honk `main` daily and opens an update PR for revisions that pass source, checksum, and patch validation.
 
 ## Screenshots
 
@@ -39,7 +40,8 @@ The layout also adapts to narrow screens:
 
 ~~~text
 honk/                  OpenWrt recipe for the Honk engine and service
-luci-app-honk/         LuCI package, RPC bridge, and dashboard source
+luci-app-honk/         New standalone LuCI package and dashboard source
+luci-app-honk-legacy/  Preserved legacy LuCI package and dashboard source
 honk/patches/          OpenWrt-specific upstream patches
 locks/source.lock.json Source and patch digest lock file
 tests/                 Focused packaging and integration checks
@@ -47,7 +49,7 @@ tests/                 Focused packaging and integration checks
 
 ## Requirements
 
-The fast package path supports x86_64 and aarch64 targets. It needs an OpenWrt SDK plus the feeds that provide v2ray-geoip, v2ray-geosite, kmod-sched-core, kmod-sched-bpf, and kmod-veth. Rust is not installed in the SDK container on this path.
+The fast package path supports x86_64 and aarch64 targets. It needs an OpenWrt SDK plus feeds that provide kmod-sched-core, kmod-sched-bpf, kmod-veth, and the usual base runtime libraries. GeoSite and GeoIP are provisioned from the exact offline inputs in `locks/geo.lock.json`; the Honk package has no runtime dependency on a target package manager's `v2ray-*` Geo data. Rust is not installed in the SDK container on this path.
 
 The separate binary build runs on a standard Linux host with Rust stable, Rust nightly with rust-src, bpf-linker, LLVM/libclang, CMake, and Zig 0.14.1. It produces static musl binaries with the BTF-enabled eBPF object embedded. When no binaries are staged under `honk/files/bin/`, the package recipe retains its source-build fallback and requires the original Rust OpenWrt toolchain.
 
@@ -68,6 +70,7 @@ Then install this checkout as an OpenWrt feed or place the package directories i
 make menuconfig
 make package/honk/compile V=s
 make package/luci-app-honk/compile V=s
+make package/luci-app-honk-legacy/compile V=s
 ~~~
 
 For the dashboard source alone:
@@ -82,6 +85,8 @@ The generated LuCI assets are committed below luci-app-honk/root/www/luci-static
 
 ### GitHub Actions
 
+`Update Honk upstream` checks upstream `main` every day. When a new revision is available, it downloads the commit archive, calculates its SHA-256 and Git tree, validates every local patch, and creates or updates the `automation/honk-upstream` PR. It can also be run manually from the Actions page. Patch conflicts stop the refresh and retain the current buildable revision.
+
 The `Build Honk binaries` workflow compiles Honk directly on standard Linux runners. Its two parallel jobs use Zig to cross-compile static musl binaries for x86_64 and aarch64; no OpenWrt SDK is involved. Each architecture archive contains `honk-core`, `honk-tool`, a manifest, and checksums.
 
 After a binary release succeeds, `Build packages` downloads and verifies the matching archive, then starts the OpenWrt SDK matrix. LuCI-only changes reuse the existing binary release. The matrix builds:
@@ -89,11 +94,11 @@ After a binary release succeeds, `Build packages` downloads and verifies the mat
 - IPK packages for OpenWrt 24.10 on x86_64 and aarch64_generic.
 - APK packages for OpenWrt 25.12 on x86_64 and aarch64_generic.
 
-Each matrix job only packages the staged binaries, service files, and LuCI assets; it does not compile Rust or eBPF. It uploads `honk` and `luci-app-honk` as workflow artifacts. After all four builds pass, the workflow publishes the same files in a versioned GitHub Release. The architecture and SDK are appended to release filenames so LuCI's architecture-independent package is still easy to identify.
+Each matrix job only packages the staged binaries, service files, and LuCI assets; it does not compile Rust or eBPF. It uploads `honk`, `luci-app-honk`, and `luci-app-honk-legacy` as workflow artifacts. After all four builds pass, the workflow publishes the same files in a versioned GitHub Release. The architecture and SDK are appended to release filenames so LuCI's architecture-independent packages are still easy to identify.
 
 ## Install
 
-Build or download both packages, install honk first, then luci-app-honk. Use the package manager provided by the target image:
+Build or download the engine and the LuCI packages, install honk first, then choose the new package. Keep the legacy package only when rollback/reference access is needed; the two LuCI packages have disjoint paths:
 
 ~~~sh
 # apk-based OpenWrt snapshots
@@ -109,13 +114,29 @@ The LuCI page is available at:
 /cgi-bin/luci/admin/services/honk
 ~~~
 
-On first access, the LuCI bridge can migrate legacy loopback/UI settings, create an API secret, and persist the selected primary node. Save writes a validated configuration. Save & Apply validates, replaces the configuration atomically, restarts Honk, and restores the previous disk configuration if restart fails. Revision checks prevent one browser session from silently overwriting another.
+The new page is available at `/cgi-bin/luci/admin/services/honk`; the preserved package is isolated at `/cgi-bin/luci/admin/services/honk-legacy/`. The new controller reads and preserves existing node, subscription, experimental, and unknown sections while rebuilding only its managed mode sections. Each apply validates, backs up, atomically writes, restarts Honk, checks health, and restores the previous configuration on failure.
+
+## Quick Setup and Geo Assets
+
+Quick Setup is the first Honk view. It uses the existing subscription and node data and writes only the single `/etc/honk/config.dae` runtime configuration. The four presets are GFWList, China Direct, Global Proxy, and Direct. Each preview shows the selected source groups, discovered LAN/WAN devices, route/DNS projection, revision, and a server-generated candidate digest before an apply is accepted. The Advanced editor remains available; an advanced-owned configuration requires an explicit replacement confirmation.
+
+The package ships the locked assets under Honk-owned paths:
+
+| Asset | Locked input | Installed payload | Public loading path |
+| --- | --- | --- | --- |
+| GeoSite | Loyalsoldier release `202607312254`, SHA-256 `1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f` | `/usr/lib/honk/geosite.dat` | `/usr/share/honk/geosite.dat` |
+| GeoIP | V2Fly release `202607171233`, SHA-256 `b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a` | `/usr/lib/honk/geoip.dat` | `/usr/share/honk/geoip.dat` |
+
+`/usr/share/honk/geo.lock.json` and `/run/honk/geo-assets.json` record provenance and the active receipt. A V2Fly or custom GeoSite path, a missing label, or a hash mismatch disables only presets that need the locked GeoSite. The confirmation-based Geo repair command recreates the Honk-owned symlink after verifying the packaged payload; it does not touch `/usr/share/v2ray` or download rules. A service restart is still required before the live receipt re-opens those presets.
+
+Quick mutations are handled by `/usr/libexec/honk/quick-transaction-worker`. It keeps the previous bytes in a root-only sidecar, records each durable stage, and restores the prior running or stopped state after a failed restart, subscription wait, or probe. A failed recovery is reported as `degraded` and remains visible for operator action. Direct can be applied without a proxy subscription, while proxy presets require a non-empty, validated source group and the Geo/DNS/interface gates. Geo data is updated by changing the lock and package inputs, not through an online LuCI action.
 
 ## Runtime Paths
 
 | Purpose | Path |
 | --- | --- |
 | Main configuration | /etc/honk/config.dae |
+| Default template | /etc/honk/config.dae.default |
 | Optional includes | /etc/honk/config.d/ |
 | UCI service settings | /etc/config/honk |
 | Init script | /etc/init.d/honk |
@@ -129,6 +150,12 @@ honk-tool validate --config /etc/honk/config.dae --json
 /etc/init.d/honk enable
 /etc/init.d/honk start
 ~~~
+
+`config.dae.default` is the complete package-provided Honk baseline and is not a conffile. The user-owned
+`config.dae` is preserved across upgrades. If the active configuration is missing, the init script seeds it from
+the template before running the normal `honk-tool validate` and Geo preflight. The LuCI Advanced page uses the same
+template for its Restore defaults action, saves the current valid configuration as
+`/etc/honk/config.dae.last-good`, and rolls back if replacement or reload fails.
 
 The launcher writes Honk stdout and stderr to the runtime log. The init script does not configure procd stdout/stderr forwarding, so core output stays out of the system log.
 
@@ -209,7 +236,7 @@ honk-tool validate --config /etc/honk/config.dae --json
 /etc/init.d/honk restart
 ~~~
 
-Honk owns its TC, namespace, route, and eBPF lifecycle. This feed does not install host iptables or nftables TPROXY rules.
+Honk owns its TC, namespace, route, and eBPF lifecycle. Quick Setup does not create a second route model or configuration writer.
 
 ## Development Checks
 
@@ -219,7 +246,7 @@ git diff --check
 cd luci-app-honk/ui && npm ci && npm run build
 ~~~
 
-The package checks verify source and patch digests, shell/Lua syntax, RPC/menu manifests, generated assets, and the dashboard contracts used by the LuCI bridge.
+The package checks verify source and patch digests, locked Geo payloads, shell/Lua syntax, RPC/menu manifests, generated assets, and the Quick Setup/transaction contracts used by the LuCI bridge.
 
 ## Upstream Documentation
 

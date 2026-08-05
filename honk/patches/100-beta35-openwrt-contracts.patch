@@ -1,0 +1,2153 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 3188d30..efc72a1 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1656,6 +1656,8 @@ dependencies = [
+  "honk-ebpf-common",
+  "honk-outbound",
+  "libc",
++ "serde_json",
++ "sha2 0.11.0",
+  "tokio",
+  "tracing",
+  "tracing-subscriber",
+diff --git a/crates/honk-config/src/parser/mod.rs b/crates/honk-config/src/parser/mod.rs
+index 120f2d0..10d2c7c 100644
+--- a/crates/honk-config/src/parser/mod.rs
++++ b/crates/honk-config/src/parser/mod.rs
+@@ -400,7 +400,11 @@ pub fn parse_dae_config(input: &str) -> Result<Config, crate::ConfigError> {
+         }
+     }
+ 
+-    resolve_group_filters(&mut config.groups, &config.nodes);
++    resolve_group_filters_with_subscriptions(
++        &mut config.groups,
++        &config.nodes,
++        &config.subscriptions,
++    );
+ 
+     Ok(config)
+ }
+@@ -408,13 +412,25 @@ pub fn parse_dae_config(input: &str) -> Result<Config, crate::ConfigError> {
+ /// Resolve group filters into concrete node UUIDs.
+ ///
+ /// Supports `name('pattern')` where `pattern` is a regular expression matched
+-/// against the node name. This lets groups include static nodes as well as
+-/// nodes added dynamically (for example, from a fetched subscription).
++/// against the node name and `subscription('tag')` for dynamically fetched
++/// nodes belonging to a subscription. This lets groups include static nodes
++/// as well as nodes added dynamically (for example, from a fetched
++/// subscription).
+ ///
+ /// `group('tag')` entries are not node filters — the dae parser routes them
+ /// into `Group.groups` (nested sub-groups) at parse time; any that still end
+ /// up here are ignored by node-filter resolution.
+ pub fn resolve_group_filters(groups: &mut [Group], nodes: &[Node]) {
++    resolve_group_filters_with_subscriptions(groups, nodes, &[]);
++}
++
++/// Resolve group filters with subscription tags available. The two-argument
++/// wrapper above remains for callers that only have static nodes.
++pub fn resolve_group_filters_with_subscriptions(
++    groups: &mut [Group],
++    nodes: &[Node],
++    subscriptions: &[Subscription],
++) {
+     for group in groups {
+         let filters: Vec<&str> = group
+             .filters
+@@ -437,6 +453,21 @@ pub fn resolve_group_filters(groups: &mut [Group], nodes: &[Node]) {
+         }
+ 
+         for filter in &filters {
++            if let Some(tags) = extract_fn_args(filter, "subscription") {
++                let ids: Vec<_> = subscriptions
++                    .iter()
++                    .filter(|subscription| tags.iter().any(|tag| tag == &subscription.name))
++                    .map(|subscription| subscription.id)
++                    .collect();
++                for node in nodes {
++                    if node.subscription_id.is_some_and(|id| ids.contains(&id))
++                        && !group.nodes.contains(&node.id)
++                    {
++                        group.nodes.push(node.id);
++                    }
++                }
++                continue;
++            }
+             let re = parse_name_filter(filter);
+             let Some(re) = re else { continue };
+             for node in nodes {
+@@ -1438,7 +1469,13 @@ fn parse_group_policy(policy: &str) -> crate::group::GroupPolicy {
+ 
+ fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, crate::ConfigError> {
+     let mut subs = Vec::new();
+-    for line in section.body.lines() {
++    let nested = split_nested_sections_named(&section.body)?;
++    for line in nested
++        .first()
++        .map(|item| item.body.as_str())
++        .unwrap_or("")
++        .lines()
++    {
+         let trimmed = line.trim();
+         if trimmed.is_empty() || trimmed.starts_with('#') {
+             continue;
+@@ -1460,6 +1497,25 @@ fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, cr
+             });
+         }
+     }
++    for entry in nested.into_iter().skip(1) {
++        let kv = parse_kv_pairs(&entry.body);
++        let Some(url) = kv.get("url").filter(|url| !url.is_empty()) else {
++            continue;
++        };
++        let mut subscription = Subscription {
++            name: entry.name,
++            url: url.clone(),
++            id: uuid::Uuid::new_v4(),
++            ..Default::default()
++        };
++        if let Some(interval) = kv.get("update_interval") {
++            subscription.update_interval = interval.parse().unwrap_or(86400);
++        }
++        if let Some(enabled) = kv.get("enabled") {
++            subscription.enabled = parse_bool(enabled);
++        }
++        subs.push(subscription);
++    }
+     Ok(subs)
+ }
+ 
+diff --git a/crates/honk-config/src/parser/tests.rs b/crates/honk-config/src/parser/tests.rs
+index 62581ce..68a37d3 100644
+--- a/crates/honk-config/src/parser/tests.rs
++++ b/crates/honk-config/src/parser/tests.rs
+@@ -319,6 +319,42 @@ subscription {
+         assert_eq!(config.subscriptions.len(), 2);
+     }
+ 
++    #[test]
++    fn test_parse_subscription_options_and_filter() {
++        let input = r#"
++subscription {
++    remote {
++        url: 'https://example.com/sub'
++        update_interval: 3600
++        enabled: false
++    }
++}
++group {
++    remote {
++        filter: subscription('remote')
++        policy: selector
++    }
++}
++"#;
++        let mut config = parse_dae_config(input).unwrap();
++        assert_eq!(config.subscriptions.len(), 1);
++        assert_eq!(config.subscriptions[0].update_interval, 3600);
++        assert!(!config.subscriptions[0].enabled);
++
++        let node = crate::node::Node {
++            name: "remote-1".to_string(),
++            subscription_id: Some(config.subscriptions[0].id),
++            ..Default::default()
++        };
++        config.nodes.push(node.clone());
++        crate::parser::resolve_group_filters_with_subscriptions(
++            &mut config.groups,
++            &config.nodes,
++            &config.subscriptions,
++        );
++        assert_eq!(config.groups[0].nodes, vec![node.id]);
++    }
++
+     #[test]
+     fn test_parse_full_global() {
+         let input = r#"
+diff --git a/crates/honk-config/src/share_link.rs b/crates/honk-config/src/share_link.rs
+index c21c01d..254db5d 100644
+--- a/crates/honk-config/src/share_link.rs
++++ b/crates/honk-config/src/share_link.rs
+@@ -103,7 +103,7 @@ impl Node {
+             // URI userinfo field, not the password field.  Copy it to
+             // `password` so the protocol handler can build the correct request
+             // header.
+-            if matches!(protocol, NodeProtocol::Trojan | NodeProtocol::AnyTLS)
++            if matches!(protocol, NodeProtocol::Trojan | NodeProtocol::VLess | NodeProtocol::AnyTLS)
+                 && node.password.is_none()
+                 && !url.username().is_empty()
+             {
+@@ -144,7 +144,7 @@ impl Node {
+         // Trojan transport options.  `alpn` is accepted for
+         // compatibility but intentionally not stored.
+         let mut host_consumed = false;
+-        if protocol == NodeProtocol::Trojan {
++        if matches!(protocol, NodeProtocol::Trojan | NodeProtocol::VLess) {
+             match node.transport.as_str() {
+                 "ws" => {
+                     if let Some(v) = query.get("host") {
+@@ -152,7 +152,7 @@ impl Node {
+                         host_consumed = true;
+                     }
+                     if let Some(v) = query.get("path") {
+-                        node.ws_path = Some(v.clone());
++                        node.ws_path = Some(strip_ws_early_data(v));
+                     }
+                 }
+                 "grpc" => {
+@@ -196,8 +196,8 @@ impl Node {
+         if let Some(v) = query.get("ech_config").or_else(|| query.get("echconfig")) {
+             node.ech_enabled = true;
+             node.ech_config = Some(v.clone());
+-        } else if let Some(v) = query.get("ech") {
+-            node.ech_enabled = v == "1" || v.eq_ignore_ascii_case("true");
++        } else if query.get("ech").is_some_and(|v| !v.is_empty()) {
++            node.ech_enabled = true;
+         }
+ 
+         if let Some(v) = query.get("plugin") {
+@@ -325,6 +325,21 @@ impl Node {
+     }
+ }
+ 
++fn strip_ws_early_data(path: &str) -> String {
++    let Some((base, params)) = path.split_once('?') else {
++        return path.to_string();
++    };
++    let kept: Vec<&str> = params
++        .split('&')
++        .filter(|part| !part.starts_with("ed="))
++        .collect();
++    if kept.is_empty() {
++        base.to_string()
++    } else {
++        format!("{base}?{}", kept.join("&"))
++    }
++}
++
+ /// Parse a `vmess://` share link: base64 of a JSON object (v2rayN schema).
+ fn parse_vmess_link(link: &str, payload: &str) -> Result<Node, ConfigError> {
+     let raw = base64_decode_flexible(payload).ok_or_else(|| {
+diff --git a/crates/honk-config/src/subscription.rs b/crates/honk-config/src/subscription.rs
+index db1d316..1930f1a 100644
+--- a/crates/honk-config/src/subscription.rs
++++ b/crates/honk-config/src/subscription.rs
+@@ -27,6 +27,10 @@ pub struct Subscription {
+     /// Number of nodes from this subscription
+     #[serde(default)]
+     pub node_count: u32,
++    /// Last refresh error. This is runtime metadata and is not emitted into
++    /// the dae configuration syntax.
++    #[serde(default)]
++    pub last_error: Option<String>,
+     /// Created at
+     #[serde(default = "Utc::now")]
+     pub created_at: DateTime<Utc>,
+diff --git a/crates/honk-core/src/clash_api.rs b/crates/honk-core/src/clash_api.rs
+index 9c14423..c6015e9 100644
+--- a/crates/honk-core/src/clash_api.rs
++++ b/crates/honk-core/src/clash_api.rs
+@@ -35,6 +35,7 @@ use honk_outbound::group::{GroupManager, SharedGroupManager};
+ use honk_outbound::urltest::{urltest_group, urltest_node};
+ use std::sync::Arc;
+ use std::time::Duration;
++use tokio::sync::mpsc;
+ 
+ const STREAM_CHANNEL_CAPACITY: usize = 16;
+ 
+@@ -93,6 +94,8 @@ pub struct ClashState {
+     pub dns_service: crate::dns::DnsService,
+     /// Shared lazy samplers for high-fanout websocket/HTTP streams.
+     pub stream_samplers: Arc<StreamSamplers>,
++    /// Control-plane command channel used by manual subscription refreshes.
++    pub command_tx: mpsc::Sender<crate::control::ControlCommand>,
+ }
+ 
+ pub fn router(state: Arc<ClashState>) -> Router {
+@@ -113,6 +116,7 @@ pub fn router(state: Arc<ClashState>) -> Router {
+             get(get_connections).delete(delete_connections),
+         )
+         .route("/connections/{id}", delete(delete_connection))
++        .route("/memory", get(get_memory))
+         .route("/traffic", get(get_traffic))
+         .route("/stats", get(get_outbound_stats))
+         .route("/logs", get(get_logs))
+@@ -121,6 +125,8 @@ pub fn router(state: Arc<ClashState>) -> Router {
+         .route("/cache/dns/flush", post(flush_dns))
+         .route("/providers/proxies", get(get_proxy_providers))
+         .route("/providers/rules", get(get_rule_providers))
++        .route("/subscriptions", get(get_subscriptions))
++        .route("/subscriptions/{name}/refresh", post(refresh_subscription))
+         .route_layer(middleware::from_fn_with_state(
+             state.clone(),
+             auth_middleware,
+@@ -156,6 +162,90 @@ pub fn router(state: Arc<ClashState>) -> Router {
+         .with_state(state)
+ }
+ 
++async fn get_subscriptions(State(s): State<Arc<ClashState>>) -> Json<serde_json::Value> {
++    let config = s.config.read().await;
++    let subscriptions = config
++        .subscriptions
++        .iter()
++        .map(|subscription| {
++            let nodes = config
++                .nodes
++                .iter()
++                .filter(|node| node.subscription_id == Some(subscription.id))
++                .map(|node| {
++                    serde_json::json!({
++                        "name": node.name,
++                        "protocol": node.protocol.as_str(),
++                    })
++                })
++                .collect::<Vec<_>>();
++            let state = if subscription.last_error.is_some() {
++                "error"
++            } else if subscription.node_count > 0 {
++                "ready"
++            } else {
++                "idle"
++            };
++            serde_json::json!({
++                "name": subscription.name,
++                "enabled": subscription.enabled,
++                "updateInterval": subscription.update_interval,
++                "nodeCount": subscription.node_count,
++                "updatedAt": subscription.last_updated.map(|time| time.to_rfc3339()),
++                "state": state,
++                "error": subscription.last_error,
++                "nodes": nodes,
++            })
++        })
++        .collect::<Vec<_>>();
++    Json(serde_json::json!({"subscriptions": subscriptions}))
++}
++
++async fn refresh_subscription(
++    State(s): State<Arc<ClashState>>,
++    Path(name): Path<String>,
++) -> Response {
++    let subscription = {
++        let config = s.config.read().await;
++        config
++            .subscriptions
++            .iter()
++            .find(|subscription| subscription.name == name)
++            .cloned()
++    };
++    let Some(subscription) = subscription else {
++        return error_response(StatusCode::NOT_FOUND, "subscription not found");
++    };
++    let command_tx = s.command_tx.clone();
++    tokio::spawn(async move {
++        let result = match crate::subscription::SubscriptionManager::new() {
++            Ok(manager) => manager.fetch(&subscription).await,
++            Err(error) => Err(error),
++        };
++        match result {
++            Ok(nodes) => {
++                let _ = command_tx
++                    .send(crate::control::ControlCommand::MergeSubscription {
++                        subscription_id: subscription.id,
++                        name: subscription.name,
++                        nodes,
++                    })
++                    .await;
++            }
++            Err(error) => {
++                let _ = command_tx
++                    .send(crate::control::ControlCommand::SubscriptionError {
++                        subscription_id: subscription.id,
++                        name: subscription.name,
++                        error: error.to_string().replace(&subscription.url, "<subscription>"),
++                    })
++                    .await;
++            }
++        }
++    });
++    StatusCode::ACCEPTED.into_response()
++}
++
+ pub async fn serve(state: Arc<ClashState>, listen: std::net::SocketAddr) {
+     let app = router(state);
+     let listener = match tokio::net::TcpListener::bind(listen).await {
+@@ -1122,6 +1212,55 @@ async fn delete_connection(State(s): State<Arc<ClashState>>, Path(id): Path<Stri
+     StatusCode::NO_CONTENT
+ }
+ 
++/// Current resident set size in bytes, matching Mihomo's `/memory` payload.
++fn process_rss_bytes() -> u64 {
++    std::fs::read_to_string("/proc/self/status")
++        .ok()
++        .and_then(|status| {
++            status
++                .lines()
++                .find(|line| line.starts_with("VmRSS:"))
++                .and_then(|line| line.split_whitespace().nth(1))
++                .and_then(|value| value.parse::<u64>().ok())
++        })
++        .unwrap_or(0)
++        .saturating_mul(1024)
++}
++
++fn memory_json() -> serde_json::Value {
++    serde_json::json!({"inuse": process_rss_bytes()})
++}
++
++async fn get_memory(ws: MaybeWs) -> Response {
++    let Some(ws) = ws.0 else {
++        return chunked_json_response(memory_chunk_stream());
++    };
++    ws.on_upgrade(memory_ws)
++}
++
++async fn memory_ws(mut socket: WebSocket) {
++    let mut tick = tokio::time::interval(Duration::from_secs(1));
++    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
++    loop {
++        tick.tick().await;
++        if socket
++            .send(Message::Text(memory_json().to_string().into()))
++            .await
++            .is_err()
++        {
++            break;
++        }
++    }
++}
++
++fn memory_chunk_stream(
++) -> impl futures::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
++    futures::stream::unfold((), |_| async move {
++        tokio::time::sleep(Duration::from_secs(1)).await;
++        Some((Ok(Bytes::from(format!("{}\n", memory_json()))), ()))
++    })
++}
++
+ async fn traffic_totals(s: &ClashState) -> (u64, u64) {
+     traffic_totals_stats(&s.stats)
+ }
+diff --git a/crates/honk-core/src/control/connection.rs b/crates/honk-core/src/control/connection.rs
+index 088c715..6de0d48 100644
+--- a/crates/honk-core/src/control/connection.rs
++++ b/crates/honk-core/src/control/connection.rs
+@@ -198,14 +198,13 @@ impl ControlPlaneHandle {
+         }
+     }
+ 
+-    /// Clash mode override (approximate clash semantics), applied after the
+-    /// eBPF handoff / userspace Router produced an outbound and before
+-    /// `resolve_outbound_nodes`:
++    /// Clash mode override, applied after the eBPF handoff / userspace Router
++    /// produced an outbound and before `resolve_outbound_nodes`:
+     ///
+     /// - mode `Direct` forces `direct`;
+-    /// - mode `Global` forces the current GLOBAL selection (a group or node
+-    ///   name, resolved via the normal path; when it resolves to nothing the
+-    ///   original routing result is kept);
++    /// - mode `Rule` keeps direct rules but sends routed proxy traffic to the
++    ///   primary selection;
++    /// - mode `Global` sends all eligible traffic to that same selection;
+     /// - `block` results and `must` results (dae `(must)` rules / eBPF
+     ///   handoff must flag) are never overridden — both are final routing
+     ///   decisions that mode switches must not bypass.
+@@ -217,10 +216,10 @@ impl ControlPlaneHandle {
+             return outbound_name;
+         }
+         let state = { mode_state.read().clone() };
+-        // The GLOBAL selection needs a config lookup to decide whether it
+-        // resolves to a group/node; only do it in Global mode.
++        // The primary selection needs a config lookup to decide whether it
++        // resolves to a group/node. Both Rule and Global use it.
+         let mut selection_resolvable = false;
+-        if state.is_global() && !state.global_selection.is_empty() {
++        if !state.is_direct() && !state.global_selection.is_empty() {
+             let selection = &state.global_selection;
+             selection_resolvable = *selection == "direct" || *selection == "block" || {
+                 let config = self.config.read().await;
+@@ -229,7 +228,7 @@ impl ControlPlaneHandle {
+             };
+             if !selection_resolvable {
+                 debug!(
+-                    "clash Global selection '{}' does not resolve; keeping routed outbound '{}'",
++                    "clash primary selection '{}' does not resolve; keeping routed outbound '{}'",
+                     selection, outbound_name
+                 );
+             }
+@@ -427,9 +426,8 @@ impl ControlPlaneHandle {
+                 .map(|m| (m.rule_type.to_string(), m.rule_payload.to_string()))
+         };
+ 
+-        // Clash mode override (Direct/Global); no-op when the clash API is
+-        // disabled or mode is Rule. Must-rule and block results are never
+-        // overridden.
++        // Clash primary-node override. Direct, must-rule, and block results
++        // retain their dedicated routing semantics.
+         let outbound_name = self.apply_mode_override(outbound_name, must).await;
+ 
+         // For userspace-routed flows with a sniffed domain, write the resolved
+diff --git a/crates/honk-core/src/control/mod.rs b/crates/honk-core/src/control/mod.rs
+index 32a3ee9..d66820f 100644
+--- a/crates/honk-core/src/control/mod.rs
++++ b/crates/honk-core/src/control/mod.rs
+@@ -74,6 +74,13 @@ pub mod commands {
+             name: String,
+             nodes: Vec<Node>,
+         },
++        /// Record a failed subscription refresh while keeping its last good
++        /// node set active.
++        SubscriptionError {
++            subscription_id: uuid::Uuid,
++            name: String,
++            error: String,
++        },
+         Shutdown,
+         GetStats(mpsc::Sender<super::StatsSnapshot>),
+     }
+@@ -339,7 +346,21 @@ impl ControlPlane {
+                     hook
+                 };
+             alive_set.set_resolver(make_hook(controller.clone()));
+-            honk_outbound::urltest::set_urltest_resolver(make_hook(controller));
++            // URLTest probes must resolve their check URL outside the
++            // regular DNS routing graph. Resolving a check URL through a
++            // proxy group makes every node check depend on that same group
++            // and can deadlock when its selected node is being tested.
++            // Bootstrap DNS is direct and follows node-host resolution.
++            honk_outbound::urltest::set_urltest_resolver(Arc::new(|host, port| {
++                Box::pin(async move {
++                    honk_outbound::bootstrap::resolve(&host)
++                        .await
++                        .unwrap_or_default()
++                        .into_iter()
++                        .map(|ip| std::net::SocketAddr::new(ip, port))
++                        .collect()
++                })
++            }));
+         }
+ 
+         let control_plane = Self {
+@@ -1188,6 +1209,18 @@ impl ControlPlane {
+                             // both commands queue on this single channel.
+                             let _ = self.apply_runtime_config(new_config, &drain).await;
+                         }
++                        Some(ControlCommand::SubscriptionError { subscription_id, name, error }) => {
++                            let mut config = self.config.write().await;
++                            if let Some(subscription) = config
++                                .subscriptions
++                                .iter_mut()
++                                .find(|subscription| subscription.id == subscription_id)
++                            {
++                                subscription.last_error = Some(error);
++                            } else {
++                                warn!("Subscription '{}' is no longer configured", name);
++                            }
++                        }
+                         Some(ControlCommand::GetStats(tx)) => {
+                             let snap = self.stats.snapshot();
+                             let total = snap.values().map(|s| s.total_conns as u64).sum();
+diff --git a/crates/honk-core/src/control/reload.rs b/crates/honk-core/src/control/reload.rs
+index b2251d3..9667158 100644
+--- a/crates/honk-core/src/control/reload.rs
++++ b/crates/honk-core/src/control/reload.rs
+@@ -723,6 +723,20 @@ pub(super) fn config_with_subscription_nodes(
+         .nodes
+         .retain(|n| n.subscription_id != Some(subscription_id));
+     config.nodes.extend(nodes);
++    let subscription_node_count = config
++        .nodes
++        .iter()
++        .filter(|node| node.subscription_id == Some(subscription_id))
++        .count() as u32;
++    if let Some(subscription) = config
++        .subscriptions
++        .iter_mut()
++        .find(|subscription| subscription.id == subscription_id)
++    {
++        subscription.node_count = subscription_node_count;
++        subscription.last_updated = Some(chrono::Utc::now());
++        subscription.last_error = None;
++    }
+     // Group membership is filter-derived state: drop dangling IDs left
+     // behind by replaced subscription nodes (refreshed parses mint fresh
+     // UUIDs), then re-resolve filters against the merged node set.
+@@ -730,7 +744,11 @@ pub(super) fn config_with_subscription_nodes(
+     for group in &mut config.groups {
+         group.nodes.retain(|id| live.contains(id));
+     }
+-    honk_config::parser::resolve_group_filters(&mut config.groups, &config.nodes);
++    honk_config::parser::resolve_group_filters_with_subscriptions(
++        &mut config.groups,
++        &config.nodes,
++        &config.subscriptions,
++    );
+     config
+ }
+ 
+diff --git a/crates/honk-core/src/ebpf/real/attach.rs b/crates/honk-core/src/ebpf/real/attach.rs
+index 7f89891..9016a40 100644
+--- a/crates/honk-core/src/ebpf/real/attach.rs
++++ b/crates/honk-core/src/ebpf/real/attach.rs
+@@ -399,21 +399,28 @@ impl RealEbpfBackend {
+                     slave_prog, slave
+                 );
+ 
+-                let egress_result: anyhow::Result<()> = (|| {
+-                    let p: &mut aya::programs::SchedClassifier = bpf
+-                        .program_mut("lan_egress_l2")
+-                        .ok_or_else(|| anyhow::anyhow!("lan_egress_l2 program disappeared"))?
+-                        .try_into()?;
+-                    let id = p
+-                        .attach(slave, egress_dir)
+-                        .map_err(|e| anyhow::anyhow!("attach lan_egress_l2 to {}: {}", slave, e))?;
+-                    dynamic_links.push((Self::iface_ifindex(slave), true, p.take_link(id)?));
+-                    Ok(())
+-                })();
+-                egress_result.map_err(|e| {
+-                    anyhow::anyhow!("attach lan_egress_l2 to bridge slave {}: {}", slave, e)
+-                })?;
+-                info!("attached lan_egress_l2 to bridge slave {} (Egress)", slave);
++                if !single_homed {
++                    let egress_result: anyhow::Result<()> = (|| {
++                        let p: &mut aya::programs::SchedClassifier = bpf
++                            .program_mut("lan_egress_l2")
++                            .ok_or_else(|| anyhow::anyhow!("lan_egress_l2 program disappeared"))?
++                            .try_into()?;
++                        let id = p.attach(slave, egress_dir).map_err(|e| {
++                            anyhow::anyhow!("attach lan_egress_l2 to {}: {}", slave, e)
++                        })?;
++                        dynamic_links.push((Self::iface_ifindex(slave), true, p.take_link(id)?));
++                        Ok(())
++                    })();
++                    match egress_result {
++                        Ok(()) => {
++                            info!("attached lan_egress_l2 to bridge slave {} (Egress)", slave)
++                        }
++                        Err(e) => warn!(
++                            "failed to attach lan_egress_l2 to bridge slave {}: {}",
++                            slave, e
++                        ),
++                    }
++                }
+             }
+         }
+ 
+diff --git a/crates/honk-core/src/ebpf/real/iface_watch.rs b/crates/honk-core/src/ebpf/real/iface_watch.rs
+index 98733c7..588c422 100644
+--- a/crates/honk-core/src/ebpf/real/iface_watch.rs
++++ b/crates/honk-core/src/ebpf/real/iface_watch.rs
+@@ -185,10 +185,14 @@ async fn reconcile(
+             ingress: true,
+             egress: !single_homed,
+         },
+-        _ => DynamicHooks {
++        IfaceRole::Wan | IfaceRole::LanBondSlave => DynamicHooks {
+             ingress: true,
+             egress: true,
+         },
++        IfaceRole::LanBridgeSlave => DynamicHooks {
++            ingress: true,
++            egress: !single_homed,
++        },
+     };
+     let mut backend = ebpf.write().await;
+     // Forget tracked entries that vanished, were recreated (their hooks
+diff --git a/crates/honk-core/src/lib.rs b/crates/honk-core/src/lib.rs
+index 898f61f..e923d03 100644
+--- a/crates/honk-core/src/lib.rs
++++ b/crates/honk-core/src/lib.rs
+@@ -391,10 +391,27 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+                     match result {
+                         Some((sub, Ok(nodes))) => {
+                             info!("Subscription '{}' fetched {} nodes", sub.name, nodes.len());
++                            let node_count = nodes.len() as u32;
+                             config.nodes.extend(nodes);
++                            if let Some(current) = config
++                                .subscriptions
++                                .iter_mut()
++                                .find(|current| current.id == sub.id)
++                            {
++                                current.node_count = node_count;
++                                current.last_updated = Some(chrono::Utc::now());
++                                current.last_error = None;
++                            }
+                         }
+                         Some((sub, Err(e))) => {
+                             warn!("Failed to fetch subscription '{}': {}", sub.name, e);
++                            if let Some(current) = config
++                                .subscriptions
++                                .iter_mut()
++                                .find(|current| current.id == sub.id)
++                            {
++                                current.last_error = Some(e.to_string());
++                            }
+                         }
+                         None => break,
+                     }
+@@ -429,7 +446,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+     // defined with `filter:` (or with no filter at all, meaning "all nodes")
+     // would otherwise end up with an empty member list for static configs.
+     // The merge is idempotent (existing IDs are kept, no duplicates).
+-    honk_config::parser::resolve_group_filters(&mut config.groups, &config.nodes);
++    honk_config::parser::resolve_group_filters_with_subscriptions(
++        &mut config.groups,
++        &config.nodes,
++        &config.subscriptions,
++    );
+     for group in &config.groups {
+         info!(
+             "Group '{}' resolved {} node(s)",
+@@ -851,6 +872,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+                         log_tx: clash_log_tx.clone(),
+                         dns_service: control_plane.dns_service(),
+                         stream_samplers,
++                        command_tx: control_plane.command_sender(),
+                     });
+                     tokio::spawn(clash_api::serve(state, listen));
+                 }
+@@ -904,6 +926,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+                     }
+                     Err(e) => {
+                         warn!("Background subscription '{}' fetch failed: {}", sub.name, e);
++                        let _ = merge_tx
++                            .send(control::ControlCommand::SubscriptionError {
++                                subscription_id: sub.id,
++                                name: sub.name.clone(),
++                                error: e.to_string(),
++                            })
++                            .await;
+                     }
+                 }
+             }
+@@ -947,6 +976,17 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+                                 "Subscription '{}' refresh failed; keeping existing nodes: {}",
+                                 sub.name, e
+                             );
++                            if merge_tx
++                                .send(control::ControlCommand::SubscriptionError {
++                                    subscription_id: sub.id,
++                                    name: sub.name.clone(),
++                                    error: e.to_string(),
++                                })
++                                .await
++                                .is_err()
++                            {
++                                break;
++                            }
+                         }
+                     }
+                 }
+@@ -1021,9 +1061,10 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+                     // Resolve group filters into concrete node IDs, same as
+                     // startup — otherwise filter-based groups keep stale
+                     // (or empty) member lists in the rebuilt GroupManager.
+-                    honk_config::parser::resolve_group_filters(
++                    honk_config::parser::resolve_group_filters_with_subscriptions(
+                         &mut new_config.groups,
+                         &new_config.nodes,
++                        &new_config.subscriptions,
+                     );
+                     if let Err(e) = reload_tx
+                         .send(control::ControlCommand::ReloadConfig {
+@@ -1061,10 +1102,19 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+                                             })
+                                             .await;
+                                     }
+-                                    Err(e) => warn!(
+-                                        "post-reload subscription refresh failed for '{}': {}",
+-                                        sub.name, e
+-                                    ),
++                                    Err(e) => {
++                                        warn!(
++                                            "post-reload subscription refresh failed for '{}': {}",
++                                            sub.name, e
++                                        );
++                                        let _ = tx
++                                            .send(control::ControlCommand::SubscriptionError {
++                                                subscription_id: sub.id,
++                                                name: sub.name.clone(),
++                                                error: e.to_string(),
++                                            })
++                                            .await;
++                                    }
+                                 }
+                             }
+                         });
+diff --git a/crates/honk-core/src/mode.rs b/crates/honk-core/src/mode.rs
+index 5a270c2..c8e69b3 100644
+--- a/crates/honk-core/src/mode.rs
++++ b/crates/honk-core/src/mode.rs
+@@ -1,7 +1,8 @@
+ //! Shared clash mode state (sing-box `mode` / `StoreMode` equivalent).
+ //!
+ //! Holds the current clash mode (`Rule` / `Global` / `Direct`) and the
+-//! GLOBAL group's current selection. One instance is shared between the
++//! primary node selection exposed through the GLOBAL compatibility group. One
++//! instance is shared between the
+ //! control plane (which applies the mode override on the outbound decision
+ //! path) and the clash API (which reads/writes it via `/configs` and
+ //! `/proxies/GLOBAL`). Values are restored from and persisted to cache.db.
+@@ -13,7 +14,7 @@ use std::sync::Arc;
+ pub struct ModeState {
+     /// Canonical clash mode: `"Rule"` | `"Global"` | `"Direct"`.
+     pub mode: String,
+-    /// Current GLOBAL selection: a group name, a node name, or the virtual
++    /// Current primary selection: a group name, a node name, or the virtual
+     /// `"Proxy"` entry dashboards send for the default selection.
+     pub global_selection: String,
+ }
+@@ -62,10 +63,11 @@ impl ModeState {
+     ///   must rule is an explicit force, neither of which a mode switch
+     ///   may bypass;
+     /// - mode `Direct` forces `direct`;
+-    /// - mode `Global` forces the current GLOBAL selection when it
++    /// - mode `Global` forces the current primary selection when it
+     ///   resolves (`selection_resolvable` — the caller owns the config);
+     ///   an unresolvable selection keeps the routed outbound;
+-    /// - mode `Rule` (or anything else) keeps the routed outbound.
++    /// - mode `Rule` preserves `direct` results and uses the same primary
++    ///   selection for every other routed outbound when it resolves.
+     pub fn override_outbound(
+         &self,
+         outbound_name: &str,
+@@ -81,6 +83,9 @@ impl ModeState {
+         if self.is_global() && !self.global_selection.is_empty() && selection_resolvable {
+             return self.global_selection.clone();
+         }
++        if outbound_name != "direct" && !self.global_selection.is_empty() && selection_resolvable {
++            return self.global_selection.clone();
++        }
+         outbound_name.to_string()
+     }
+ }
+@@ -107,10 +112,14 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn test_override_outbound_rule_mode_keeps_routing() {
++    fn test_override_outbound_rule_mode_uses_primary_for_proxy_routes() {
+         let s = ModeState::new("rule", "proxy");
+-        assert_eq!(s.override_outbound("proxy", false, true), "proxy");
++        assert_eq!(s.override_outbound("routed-proxy", false, true), "proxy");
+         assert_eq!(s.override_outbound("direct", false, true), "direct");
++        assert_eq!(
++            s.override_outbound("routed-proxy", false, false),
++            "routed-proxy"
++        );
+     }
+ 
+     #[test]
+diff --git a/crates/honk-core/src/subscription.rs b/crates/honk-core/src/subscription.rs
+index cd80476..3b90a72 100644
+--- a/crates/honk-core/src/subscription.rs
++++ b/crates/honk-core/src/subscription.rs
+@@ -238,6 +238,14 @@ fn parse_clash_subscription(
+         if let Some(p) = get_str("password") {
+             node.password = Some(p);
+         }
++        // Clash VLESS uses `uuid` for the authentication secret rather than
++        // the generic `password` key consumed by Honk's VLESS handler.
++        if protocol == NodeProtocol::VLess
++            && node.password.is_none()
++            && let Some(uuid) = get_str("uuid")
++        {
++            node.password = Some(uuid);
++        }
+         if let Some(c) = get_str("cipher") {
+             node.encryption = Some(c);
+         }
+@@ -266,7 +274,7 @@ fn parse_clash_subscription(
+         }
+ 
+         if let Some(path) = get_str("ws-path") {
+-            node.ws_path = Some(path);
++            node.ws_path = Some(strip_ws_early_data(&path));
+         }
+         if let Some(host) = get_str("ws-headers").or_else(|| get_str("ws-host")) {
+             node.ws_host = Some(host);
+@@ -288,6 +296,24 @@ fn parse_clash_subscription(
+     Ok(nodes)
+ }
+ 
++/// Remove Xray's `ed=` early-data marker from Clash WebSocket paths.
++/// Honk sends the VLESS header as the first binary WebSocket frame, which is
++/// accepted by the same providers without relying on the subprotocol variant.
++fn strip_ws_early_data(path: &str) -> String {
++    let Some((base, params)) = path.split_once('?') else {
++        return path.to_string();
++    };
++    let kept: Vec<&str> = params
++        .split('&')
++        .filter(|part| !part.starts_with("ed="))
++        .collect();
++    if kept.is_empty() {
++        base.to_string()
++    } else {
++        format!("{base}?{}", kept.join("&"))
++    }
++}
++
+ /// Parse a single node share link via the unified parser in honk-config.
+ fn parse_node_uri(uri: &str) -> anyhow::Result<Node> {
+     Node::from_share_link(uri).map_err(anyhow::Error::new)
+diff --git a/crates/honk-core/tests/clash_api_test.rs b/crates/honk-core/tests/clash_api_test.rs
+index b60084b..a2b6b33 100644
+--- a/crates/honk-core/tests/clash_api_test.rs
++++ b/crates/honk-core/tests/clash_api_test.rs
+@@ -146,6 +146,7 @@ async fn spawn_app_with_config(config: Config, secret: &str, external_ui: &str)
+     )));
+     let stats = Arc::new(StatsManager::new());
+     let connection_tracker = Arc::new(ConnectionTracker::new());
++    let (command_tx, _command_rx) = tokio::sync::mpsc::channel(16);
+     let runtime_registry = honk_outbound::runtime::OutboundRuntimeRegistry::build(&config.nodes)
+         .unwrap()
+         .into_shared();
+@@ -165,6 +166,7 @@ async fn spawn_app_with_config(config: Config, secret: &str, external_ui: &str)
+         dns_service,
+         connection_pool: Arc::new(honk_core::pool::ConnectionPool::new()),
+         stream_samplers: Arc::new(clash_api::StreamSamplers::new()),
++        command_tx,
+     });
+ 
+     let app = clash_api::router(state.clone());
+@@ -1100,6 +1102,7 @@ async fn test_dns_query_upstream_and_nxdomain() {
+         dns_service: nx_service,
+         connection_pool: app.state.connection_pool.clone(),
+         stream_samplers: app.state.stream_samplers.clone(),
++        command_tx: app.state.command_tx.clone(),
+     });
+     let nx_app = clash_api::router(state);
+     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+diff --git a/crates/honk-ebpf/.cargo/config.toml b/crates/honk-ebpf/.cargo/config.toml
+index 76cbb41..4254b86 100644
+--- a/crates/honk-ebpf/.cargo/config.toml
++++ b/crates/honk-ebpf/.cargo/config.toml
+@@ -5,7 +5,7 @@ rustflags = [
+   "-C",
+   "llvm-args=-inline-threshold=300",
+   "-C",
+-  "linker=/root/.cargo/bin/bpf-linker-wrapper",
++  "linker=bpf-linker",
+   "-C",
+   "debuginfo=2",
+   "-C",
+diff --git a/crates/honk-outbound/src/proxy/transport.rs b/crates/honk-outbound/src/proxy/transport.rs
+index 9ee8cbd..93a5b3f 100644
+--- a/crates/honk-outbound/src/proxy/transport.rs
++++ b/crates/honk-outbound/src/proxy/transport.rs
+@@ -31,10 +31,18 @@ use super::AsyncReadWrite;
+ pub(crate) async fn connect_transport(
+     node: &Node,
+     connect_timeout: std::time::Duration,
++) -> anyhow::Result<Box<dyn AsyncReadWrite>> {
++    connect_transport_with_initial_data(node, connect_timeout, None).await
++}
++
++pub(crate) async fn connect_transport_with_initial_data(
++    node: &Node,
++    connect_timeout: std::time::Duration,
++    initial_data: Option<&[u8]>,
+ ) -> anyhow::Result<Box<dyn AsyncReadWrite>> {
+     let addr = format!("{}:{}", node.host(), node.port);
+     let tcp = crate::util::connect_outbound(&addr, connect_timeout).await?;
+-    wrap_transport(node, tcp).await
++    wrap_transport_with_initial_data(node, tcp, initial_data).await
+ }
+ 
+ /// Apply TLS (when `node.tls`) and then the `node.transport` wrapping to an
+@@ -42,11 +50,19 @@ pub(crate) async fn connect_transport(
+ pub(crate) async fn wrap_transport(
+     node: &Node,
+     tcp: TcpStream,
++) -> anyhow::Result<Box<dyn AsyncReadWrite>> {
++    wrap_transport_with_initial_data(node, tcp, None).await
++}
++
++pub(crate) async fn wrap_transport_with_initial_data(
++    node: &Node,
++    tcp: TcpStream,
++    initial_data: Option<&[u8]>,
+ ) -> anyhow::Result<Box<dyn AsyncReadWrite>> {
+     let stream = maybe_tls_wrap(node, tcp).await?;
+     match node.transport.as_str() {
+         "" | "tcp" => Ok(stream), // raw TCP/TLS
+-        "ws" => wrap_ws(node, stream).await,
++        "ws" => wrap_ws(node, stream, initial_data).await,
+         "grpc" => wrap_grpc(node, stream).await,
+         // Unknown transport must not silently degrade to raw TCP — a
+         // mistyped transport means a different protocol than intended.
+@@ -58,6 +74,21 @@ pub(crate) async fn wrap_transport(
+     }
+ }
+ 
++pub(crate) fn ws_early_data_enabled(node: &Node, data: &[u8]) -> bool {
++    if node.transport != "ws" || data.is_empty() {
++        return false;
++    }
++    let Some((_, query)) = node.ws_path.as_deref().and_then(|path| path.split_once('?')) else {
++        return false;
++    };
++    let Some(limit) = query.split('&').find_map(|part| {
++        part.strip_prefix("ed=").and_then(|value| value.parse::<usize>().ok())
++    }) else {
++        return false;
++    };
++    limit > 0 && data.len() <= limit
++}
++
+ /// Wrap the stream in TLS when `node.tls` is set, using `node.sni` (or the
+ /// server host) as the SNI.
+ pub(crate) async fn maybe_tls_wrap(
+@@ -80,12 +111,18 @@ pub(crate) async fn maybe_tls_wrap(
+ async fn wrap_ws(
+     node: &Node,
+     stream: Box<dyn AsyncReadWrite>,
++    initial_data: Option<&[u8]>,
+ ) -> anyhow::Result<Box<dyn AsyncReadWrite>> {
++    if let Some(data) = initial_data.filter(|data| !data.is_empty()) {
++        return wrap_ws_with_early_data(node, stream, data).await;
++    }
+     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+ 
+     let ws_path = node.ws_path.as_deref().unwrap_or("/");
+     let ws_host = node.ws_host.as_deref().unwrap_or(node.host()).to_string();
+ 
++    tracing::debug!(node = %node.name, host = %ws_host, path = %ws_path, "WebSocket upgrade starting");
++
+     // Build the request from the URI so tungstenite generates the full
+     // handshake header set (Sec-WebSocket-Key, Upgrade, ...); a bare
+     // `http::Request` passed to `client_async` is sent as-is and real
+@@ -104,6 +141,7 @@ async fn wrap_ws(
+     let (ws_stream, _response) = tokio_tungstenite::client_async(request, stream)
+         .await
+         .map_err(|e| anyhow::anyhow!("WebSocket upgrade failed: {}", e))?;
++    tracing::debug!(node = %node.name, "WebSocket upgrade accepted");
+ 
+     let (client_half, server_half) = tokio::io::duplex(65536);
+ 
+@@ -112,6 +150,67 @@ async fn wrap_ws(
+     Ok(Box::new(client_half))
+ }
+ 
++async fn wrap_ws_with_early_data(
++    node: &Node,
++    mut stream: Box<dyn AsyncReadWrite>,
++    data: &[u8],
++) -> anyhow::Result<Box<dyn AsyncReadWrite>> {
++    use base64::Engine as _;
++    use rand::Rng;
++    use sha1::Digest;
++    use tokio::io::{AsyncReadExt, AsyncWriteExt};
++
++    let path = node.ws_path.as_deref().unwrap_or("/");
++    let ws_host = node.ws_host.as_deref().unwrap_or(node.host());
++    let mut key_bytes = [0u8; 16];
++    rand::rng().fill_bytes(&mut key_bytes);
++    let key = base64::engine::general_purpose::STANDARD.encode(key_bytes);
++    let early = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(data);
++    let request = format!(
++        "GET {path} HTTP/1.1\r\nHost: {ws_host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: {early}\r\n\r\n"
++    );
++    stream.write_all(request.as_bytes()).await?;
++
++    let mut response = Vec::with_capacity(1024);
++    let mut byte = [0u8; 1];
++    while !response.ends_with(b"\r\n\r\n") {
++        stream.read_exact(&mut byte).await?;
++        response.push(byte[0]);
++        if response.len() > 32 * 1024 {
++            anyhow::bail!("WebSocket upgrade response headers too large");
++        }
++    }
++    let response_text = String::from_utf8_lossy(&response);
++    let status_ok = response_text
++        .lines()
++        .next()
++        .is_some_and(|line| line.starts_with("HTTP/1.1 101 ") || line.starts_with("HTTP/2 101 "));
++    if !status_ok {
++        anyhow::bail!("WebSocket upgrade failed: {}", response_text.lines().next().unwrap_or(""));
++    }
++    let accept = response_text.lines().skip(1).find_map(|line| {
++        line.strip_prefix("Sec-WebSocket-Accept:").map(str::trim)
++    });
++    let mut digest = sha1::Sha1::new();
++    digest.update(key.as_bytes());
++    digest.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
++    let expected = base64::engine::general_purpose::STANDARD.encode(digest.finalize());
++    if accept != Some(expected.as_str()) {
++        anyhow::bail!("WebSocket upgrade failed: invalid Sec-WebSocket-Accept");
++    }
++
++    tracing::debug!(node = %node.name, bytes = data.len(), "WebSocket early data enabled");
++    let ws_stream = tokio_tungstenite::WebSocketStream::from_raw_socket(
++        stream,
++        tokio_tungstenite::tungstenite::protocol::Role::Client,
++        None,
++    )
++    .await;
++    let (client_half, server_half) = tokio::io::duplex(65536);
++    tokio::spawn(ws_bridge_relay(ws_stream, server_half));
++    Ok(Box::new(client_half))
++}
++
+ /// Background task that bridges a WebSocket stream to a duplex half.
+ /// Reads binary/text messages from the WebSocket and writes them to
+ /// the duplex; reads from the duplex and sends as binary WebSocket
+@@ -126,6 +225,7 @@ async fn ws_bridge_relay(
+     // server → ws
+     let s2w = async {
+         let mut buf = vec![0u8; 65536];
++        let mut first_frame = true;
+         loop {
+             use tokio::io::AsyncReadExt;
+             let n = server_read
+@@ -135,6 +235,10 @@ async fn ws_bridge_relay(
+             if n == 0 {
+                 break;
+             }
++            if first_frame {
++                tracing::debug!(direction = "client-to-upstream", bytes = n, "WebSocket first frame sent");
++                first_frame = false;
++            }
+             ws_sink
+                 .send(tokio_tungstenite::tungstenite::Message::Binary(
+                     buf[..n].to_vec().into(),
+@@ -148,15 +252,24 @@ async fn ws_bridge_relay(
+ 
+     // ws → server
+     let w2s = async {
++        let mut first_frame = true;
+         loop {
+             let msg = ws_stream.next().await;
+             match msg {
+                 Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(data))) => {
+                     use tokio::io::AsyncWriteExt;
++                    if first_frame {
++                        tracing::debug!(direction = "upstream-to-client", bytes = data.len(), "WebSocket first payload received");
++                        first_frame = false;
++                    }
+                     server_write.write_all(&data).await?;
+                 }
+                 Some(Ok(tokio_tungstenite::tungstenite::Message::Text(data))) => {
+                     use tokio::io::AsyncWriteExt;
++                    if first_frame {
++                        tracing::debug!(direction = "upstream-to-client", bytes = data.len(), "WebSocket first text payload received");
++                        first_frame = false;
++                    }
+                     server_write.write_all(data.as_bytes()).await?;
+                 }
+                 Some(Ok(
+diff --git a/crates/honk-outbound/src/proxy/vless.rs b/crates/honk-outbound/src/proxy/vless.rs
+index 0486bbb..ce5236a 100644
+--- a/crates/honk-outbound/src/proxy/vless.rs
++++ b/crates/honk-outbound/src/proxy/vless.rs
+@@ -101,31 +101,16 @@ impl VLessHandler {
+ 
+         buf
+     }
+-
+-    /// Connect to the server, optionally wrapping in TLS and then the
+-    /// `node.transport` WS/gRPC layer (via `super::transport`).
+-    async fn connect_server(
+-        node: &Node,
+-        connect_timeout: std::time::Duration,
+-    ) -> anyhow::Result<Box<dyn AsyncReadWrite>> {
+-        super::transport::connect_transport(node, connect_timeout).await
+-    }
+-
+-    /// Wrap an already-connected TCP stream with TLS (when `node.tls`) and
+-    /// then the `node.transport` WS/gRPC layer (the `dial_with_tcp` path).
+-    async fn wrap_transport(
+-        node: &Node,
+-        tcp: TcpStream,
+-    ) -> anyhow::Result<Box<dyn AsyncReadWrite>> {
+-        super::transport::wrap_transport(node, tcp).await
+-    }
+ }
+ 
+ impl VLessHandler {
+     /// Read and validate the VLESS response header:
+     /// `[version(1)][addon_len(1)][addon(addon_len)]`. Reading only the
+     /// version byte would leave any addon bytes to corrupt the stream.
+-    async fn read_response_header(stream: &mut Box<dyn AsyncReadWrite>) -> anyhow::Result<()> {
++    async fn read_response_header<R>(stream: &mut R) -> anyhow::Result<()>
++    where
++        R: tokio::io::AsyncRead + Unpin + ?Sized,
++    {
+         use tokio::io::AsyncReadExt;
+         let mut head = [0u8; 2];
+         stream.read_exact(&mut head).await?;
+@@ -141,6 +126,44 @@ impl VLessHandler {
+         }
+         Ok(())
+     }
++
++    /// VLESS servers are allowed to delay their response header until the
++    /// first target payload arrives.  Reading the response inline in `dial`
++    /// deadlocks against those servers because callers only write the target
++    /// TLS/HTTP payload after `dial` returns.  Return a duplex stream and
++    /// consume the response header on the read side while the write side can
++    /// already forward the first payload.
++    fn defer_response_header(stream: Box<dyn AsyncReadWrite>) -> Box<dyn AsyncReadWrite> {
++        let (client, relay) = tokio::io::duplex(65536);
++        tokio::spawn(async move {
++            let (mut client_read, mut client_write) = tokio::io::split(relay);
++            let (mut remote_read, mut remote_write) = tokio::io::split(stream);
++
++            let remote_to_client = async {
++                Self::read_response_header(&mut remote_read).await?;
++                tokio::io::copy(&mut remote_read, &mut client_write).await?;
++                Ok::<_, anyhow::Error>(())
++            };
++            let client_to_remote = async {
++                tokio::io::copy(&mut client_read, &mut remote_write).await?;
++                Ok::<_, anyhow::Error>(())
++            };
++
++            tokio::select! {
++                result = remote_to_client => {
++                    if let Err(error) = result {
++                        tracing::debug!(error = %error, "VLESS response relay failed");
++                    }
++                }
++                result = client_to_remote => {
++                    if let Err(error) = result {
++                        tracing::debug!(error = %error, "VLESS request relay failed");
++                    }
++                }
++            }
++        });
++        Box::new(client)
++    }
+ }
+ 
+ #[async_trait]
+@@ -156,10 +179,26 @@ impl TcpOutbound for VLessHandler {
+         let uuid_bytes = Self::parse_uuid(uuid_str)?;
+ 
+         let header = Self::build_request_header(&uuid_bytes, CMD_TCP, target, target_domain);
+-        let mut stream = Self::connect_server(node, connect_timeout).await?;
+-        stream.write_all(&header).await?;
++        let early_data = super::transport::ws_early_data_enabled(node, &header);
++        let mut stream = super::transport::connect_transport_with_initial_data(
++            node,
++            connect_timeout,
++            early_data.then_some(header.as_slice()),
++        )
++        .await?;
++        tracing::debug!(
++            node = %node.name,
++            target = %target,
++            header_len = header.len(),
++            early_data,
++            "VLESS transport connected"
++        );
++        if !early_data {
++            stream.write_all(&header).await?;
++            tracing::debug!(node = %node.name, "VLESS request header sent");
++        }
+ 
+-        Self::read_response_header(&mut stream).await?;
++        stream = Self::defer_response_header(stream);
+ 
+         Ok(ProxyStream {
+             stream,
+@@ -180,10 +219,26 @@ impl TcpOutbound for VLessHandler {
+         let uuid_bytes = Self::parse_uuid(uuid_str)?;
+ 
+         let header = Self::build_request_header(&uuid_bytes, CMD_TCP, target, target_domain);
+-        let mut stream = Self::wrap_transport(node, tcp).await?;
+-        stream.write_all(&header).await?;
++        let early_data = super::transport::ws_early_data_enabled(node, &header);
++        let mut stream = super::transport::wrap_transport_with_initial_data(
++            node,
++            tcp,
++            early_data.then_some(header.as_slice()),
++        )
++        .await?;
++        tracing::debug!(
++            node = %node.name,
++            target = %target,
++            header_len = header.len(),
++            early_data,
++            "VLESS transport connected"
++        );
++        if !early_data {
++            stream.write_all(&header).await?;
++            tracing::debug!(node = %node.name, "VLESS request header sent");
++        }
+ 
+-        Self::read_response_header(&mut stream).await?;
++        stream = Self::defer_response_header(stream);
+ 
+         Ok(ProxyStream {
+             stream,
+diff --git a/crates/honk-outbound/src/tls.rs b/crates/honk-outbound/src/tls.rs
+index 64fd024..645eebe 100644
+--- a/crates/honk-outbound/src/tls.rs
++++ b/crates/honk-outbound/src/tls.rs
+@@ -505,7 +505,15 @@ pub fn build_connector(node: &Node) -> anyhow::Result<TlsConnector> {
+     }
+     if chrome {
+         apply_chrome_ctx(&mut builder)?;
+-        builder.set_alpn_protos(CHROME_ALPN_WIRE)?;
++        // WebSocket upgrades use an HTTP/1.1 request after TLS.  Offering
++        // h2 first lets Cloudflare select HTTP/2, which has no HTTP/1.1
++        // 101 upgrade exchange and leaves the WS transport waiting forever.
++        // Xray applies the same transport-specific ALPN restriction.
++        if node.transport == "ws" {
++            builder.set_alpn_protos(b"\x08http/1.1")?;
++        } else {
++            builder.set_alpn_protos(CHROME_ALPN_WIRE)?;
++        }
+     }
+ 
+     Ok(TlsConnector {
+diff --git a/crates/honk-tool/Cargo.toml b/crates/honk-tool/Cargo.toml
+index 36c4cdf..1a1dc1a 100644
+--- a/crates/honk-tool/Cargo.toml
++++ b/crates/honk-tool/Cargo.toml
+@@ -20,3 +20,5 @@ libc.workspace = true
+ tokio.workspace = true
+ tracing.workspace = true
+ tracing-subscriber.workspace = true
++serde_json.workspace = true
++sha2.workspace = true
+diff --git a/crates/honk-tool/src/bpf.rs b/crates/honk-tool/src/bpf.rs
+index 77e8a14..135ecd9 100644
+--- a/crates/honk-tool/src/bpf.rs
++++ b/crates/honk-tool/src/bpf.rs
+@@ -180,18 +180,31 @@ fn sum_percpu_outbound(buf: &[u8]) -> OutboundStatsCounters {
+ }
+ 
+ fn possible_cpus() -> usize {
+-    std::fs::read_dir("/sys/devices/system/cpu")
+-        .map(|rd| {
+-            rd.filter_map(|e| e.ok())
+-                .filter(|e| e.file_name().to_string_lossy().starts_with("cpu"))
+-                .filter(|e| {
+-                    e.file_name()
+-                        .to_string_lossy()
+-                        .chars()
+-                        .nth(3)
+-                        .is_some_and(|c| c.is_ascii_digit())
+-                })
+-                .count()
++    fn range_count(value: &str) -> Option<usize> {
++        value.trim().split(',').try_fold(0usize, |total, item| {
++            let (start, end) = item.split_once('-').unwrap_or((item, item));
++            let start = start.parse::<usize>().ok()?;
++            let end = end.parse::<usize>().ok()?;
++            (end >= start).then_some(total.checked_add(end - start + 1)?)
++        })
++    }
++    std::fs::read_to_string("/sys/devices/system/cpu/possible")
++        .ok()
++        .and_then(|value| range_count(&value))
++        .filter(|&count| count > 0)
++        .or_else(|| {
++            std::fs::read_dir("/sys/devices/system/cpu").ok().map(|rd| {
++                rd.filter_map(|e| e.ok())
++                    .filter(|e| e.file_name().to_string_lossy().starts_with("cpu"))
++                    .filter(|e| {
++                        e.file_name()
++                            .to_string_lossy()
++                            .chars()
++                            .nth(3)
++                            .is_some_and(|c| c.is_ascii_digit())
++                    })
++                    .count()
++            })
+         })
+         .unwrap_or(1)
+         .max(1)
+@@ -235,6 +248,12 @@ pub struct StatsArgs {
+     /// BPF pin root.
+     #[arg(long, default_value = "/sys/fs/bpf")]
+     pub pin_root: PathBuf,
++    /// Emit machine-readable decimal-string counters.
++    #[arg(long)]
++    pub json: bool,
++    /// Sample duration used to calculate byte rates (0 disables sampling).
++    #[arg(long, default_value_t = 0)]
++    pub sample_ms: u64,
+ }
+ 
+ pub async fn run(args: BpfArgs) -> anyhow::Result<()> {
+@@ -400,25 +419,41 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
+     let fd = open(&args.pin_root, "BPF_STATS_MAP")?;
+     let udp_ovf: u64 = read_value(fd, &0u32.to_ne_bytes())?.unwrap_or(0);
+     let tcp_ovf: u64 = read_value(fd, &1u32.to_ne_bytes())?.unwrap_or(0);
+-    println!("conn-state overflow: udp={udp_ovf} tcp={tcp_ovf}");
++    if !args.json {
++        println!("conn-state overflow: udp={udp_ovf} tcp={tcp_ovf}");
++    }
+     let redirect_failures: u64 = read_value(fd, &2u32.to_ne_bytes())?.unwrap_or(0);
+     let handoff_failures: u64 = read_value(fd, &3u32.to_ne_bytes())?.unwrap_or(0);
+     let cookie_failures: u64 = read_value(fd, &4u32.to_ne_bytes())?.unwrap_or(0);
+-    println!(
+-        "auxiliary insert failures: redirect_track={redirect_failures} \
+-         routing_handoff={handoff_failures} cookie_pid={cookie_failures}"
+-    );
++    if !args.json {
++        println!(
++            "auxiliary insert failures: redirect_track={redirect_failures} \
++             routing_handoff={handoff_failures} cookie_pid={cookie_failures}"
++        );
++    }
+ 
+     let fd = open(&args.pin_root, "CONN_STATE_OCCUPANCY")?;
+     let inserts = read_percpu_sum(fd, ncpu, 0)?;
+     let deletes = read_percpu_sum(fd, ncpu, 1)?;
+-    println!(
+-        "conn-state occupancy: inserts={inserts} ebpf_deletes={deletes} raw_live={}",
+-        inserts.saturating_sub(deletes)
+-    );
++    if !args.json {
++        println!(
++            "conn-state occupancy: inserts={inserts} ebpf_deletes={deletes} raw_live={}",
++            inserts.saturating_sub(deletes)
++        );
++    }
+ 
+     let fd = open(&args.pin_root, "OUTBOUND_STATS")?;
+-    println!("\noutbound counters (tx_pkts tx_bytes rx_pkts rx_bytes):");
++    if !args.json {
++        println!("\noutbound counters (tx_pkts tx_bytes rx_pkts rx_bytes):");
++    }
++    let mut before = vec![OutboundStatsCounters::default(); OUTBOUND_STATS_MAP_LEN as usize];
++    if args.sample_ms > 0 {
++        for outbound in 0..OUTBOUND_STATS_MAP_LEN {
++            before[outbound as usize] = read_percpu_outbound(fd, ncpu, outbound)?;
++        }
++        std::thread::sleep(std::time::Duration::from_millis(args.sample_ms));
++    }
++    let mut outbounds = Vec::new();
+     for outbound in 0..OUTBOUND_STATS_MAP_LEN {
+         let counters = read_percpu_outbound(fd, ncpu, outbound)?;
+         if counters.tx_packets != 0
+@@ -426,12 +461,50 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
+             || counters.rx_packets != 0
+             || counters.rx_bytes != 0
+         {
+-            println!(
+-                "  outbound {outbound:<4} {} {} {} {}",
+-                counters.tx_packets, counters.tx_bytes, counters.rx_packets, counters.rx_bytes
+-            );
++            if args.json {
++                let (tx_rate, rx_rate) = if args.sample_ms > 0 {
++                    let previous = before[outbound as usize];
++                    (
++                        counters.tx_bytes.saturating_sub(previous.tx_bytes).saturating_mul(1000).checked_div(args.sample_ms).unwrap_or(0),
++                        counters.rx_bytes.saturating_sub(previous.rx_bytes).saturating_mul(1000).checked_div(args.sample_ms).unwrap_or(0),
++                    )
++                } else {
++                    (0, 0)
++                };
++                outbounds.push(serde_json::json!({
++                    "id": outbound,
++                    "txPackets": counters.tx_packets.to_string(),
++                    "txBytes": counters.tx_bytes.to_string(),
++                    "rxPackets": counters.rx_packets.to_string(),
++                    "rxBytes": counters.rx_bytes.to_string(),
++                    "txBytesPerSecond": tx_rate.to_string(),
++                    "rxBytesPerSecond": rx_rate.to_string(),
++                }));
++            } else {
++                println!(
++                    "  outbound {outbound:<4} {} {} {} {}",
++                    counters.tx_packets, counters.tx_bytes, counters.rx_packets, counters.rx_bytes
++                );
++            }
+         }
+     }
++    if args.json {
++        println!(
++            "{}",
++            serde_json::json!({
++                "ok": true,
++                "available": true,
++                "sampleMs": args.sample_ms,
++                "overflow": { "udp": udp_ovf.to_string(), "tcp": tcp_ovf.to_string() },
++                "occupancy": {
++                    "inserts": inserts.to_string(),
++                    "deletes": deletes.to_string(),
++                    "live": inserts.saturating_sub(deletes).to_string(),
++                },
++                "outbounds": outbounds,
++            })
++        );
++    }
+     Ok(())
+ }
+ 
+diff --git a/crates/honk-tool/src/diagnose.rs b/crates/honk-tool/src/diagnose.rs
+index 99b5098..5540426 100644
+--- a/crates/honk-tool/src/diagnose.rs
++++ b/crates/honk-tool/src/diagnose.rs
+@@ -67,6 +67,8 @@ pub async fn run(args: DiagnoseArgs) -> anyhow::Result<()> {
+     // 5. Occupancy + overflow via the bpf stats path.
+     match super::bpf::stats(super::bpf::StatsArgs {
+         pin_root: args.pin_root.clone(),
++        json: false,
++        sample_ms: 0,
+     }) {
+         Ok(()) => {}
+         Err(e) => {
+diff --git a/crates/honk-tool/src/geo.rs b/crates/honk-tool/src/geo.rs
+new file mode 100644
+index 0000000..afe45a1
+--- /dev/null
++++ b/crates/honk-tool/src/geo.rs
+@@ -0,0 +1,419 @@
++use anyhow::{Context, Result};
++use clap::{Args, Subcommand};
++use serde_json::{Value, json};
++use sha2::{Digest, Sha256};
++use std::fs;
++use std::io;
++use std::path::{Path, PathBuf};
++
++const LOCK_SITE_SHA: &str = "1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f";
++const LOCK_IP_SHA: &str = "b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a";
++const LOCK_SITE_SIZE: u64 = 10_540_162;
++const LOCK_IP_SIZE: u64 = 22_765_206;
++
++fn hex_digest(bytes: &[u8]) -> String {
++    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
++}
++
++#[derive(Args)]
++pub struct GeoCommand {
++    #[command(subcommand)]
++    pub command: GeoSubcommand,
++}
++
++#[derive(Subcommand)]
++pub enum GeoSubcommand {
++    /// Report disk and live Geo capabilities.
++    Capabilities(CapabilityArgs),
++    /// Restore only Honk's geosite symlink to the locked payload.
++    Repair(RepairArgs),
++}
++
++#[derive(Args, Clone)]
++pub struct CapabilityArgs {
++    #[arg(long)]
++    pub json: bool,
++    #[arg(long, value_delimiter = ',', default_value = "gfw,cn,private")]
++    pub labels: Vec<String>,
++    #[arg(long = "geoip-labels", value_delimiter = ',', default_value = "cn")]
++    pub geoip_labels: Vec<String>,
++}
++
++#[derive(Args)]
++pub struct RepairArgs {
++    #[arg(long)]
++    pub json: bool,
++    #[arg(long)]
++    pub confirm: bool,
++}
++
++fn asset_dir() -> PathBuf {
++    std::env::var_os("DAE_LOCATION_ASSET")
++        .map(PathBuf::from)
++        .unwrap_or_else(|| PathBuf::from("/usr/share/honk"))
++}
++
++fn sha256(path: &Path) -> io::Result<String> {
++    let bytes = fs::read(path)?;
++    let mut digest = Sha256::new();
++    digest.update(bytes);
++    Ok(hex_digest(digest.finalize().as_ref()))
++}
++
++fn resolved(path: &Path) -> String {
++    fs::canonicalize(path)
++        .unwrap_or_else(|_| path.to_path_buf())
++        .display()
++        .to_string()
++}
++
++/// Read only the top-level code index from a V2Ray protobuf DAT. This keeps
++/// capability checks independent of the routing matcher while rejecting
++/// malformed payloads and substring false positives.
++fn has_code(path: &Path, label: &str) -> io::Result<bool> {
++    let bytes = fs::read(path)?;
++    has_code_bytes(&bytes, label)
++}
++
++fn has_code_bytes(bytes: &[u8], label: &str) -> io::Result<bool> {
++    if label.trim().is_empty() {
++        return Ok(false);
++    }
++    let mut decoder = ProtoDecoder::new(bytes);
++    while !decoder.is_empty() {
++        let (tag, wire) = decoder.read_tag()?;
++        if tag != 1 {
++            decoder.skip_field(wire)?;
++            continue;
++        }
++        let entry = decoder.read_len_delimited()?;
++        let mut entry_decoder = ProtoDecoder::new(entry);
++        while !entry_decoder.is_empty() {
++            let (entry_tag, entry_wire) = entry_decoder.read_tag()?;
++            if entry_tag == 1 {
++                let code = String::from_utf8_lossy(entry_decoder.read_len_delimited()?)
++                    .trim()
++                    .to_ascii_lowercase();
++                if code == label.trim().to_ascii_lowercase() {
++                    return Ok(true);
++                }
++            } else {
++                entry_decoder.skip_field(entry_wire)?;
++            }
++        }
++    }
++    Ok(false)
++}
++
++fn requested_labels(path: &Path, labels: &[String]) -> Vec<Value> {
++    labels
++        .iter()
++        .map(|label| {
++            let present = has_code(path, label).unwrap_or(false);
++            json!({"label": label, "present": present})
++        })
++        .collect()
++}
++
++fn status_for(
++    path: &Path,
++    expected_sha: &str,
++    expected_size: u64,
++    provider: &str,
++) -> (&'static str, String, u64, bool) {
++    let resolved_path = resolved(path);
++    let Ok(metadata) = fs::metadata(path) else {
++        return ("MISSING", resolved_path, 0, false);
++    };
++    let Ok(actual_sha) = sha256(path) else {
++        return ("MISSING", resolved_path, metadata.len(), false);
++    };
++    if resolved_path.starts_with("/usr/share/v2ray/") || resolved_path.starts_with("/etc/v2ray/") {
++        return (
++            "V2FLY_GFW_UNSUPPORTED",
++            resolved_path,
++            metadata.len(),
++            false,
++        );
++    }
++    if actual_sha != expected_sha || metadata.len() != expected_size {
++        return ("TAMPERED", resolved_path, metadata.len(), false);
++    }
++    if provider == "LOYALSOLDIER" && !resolved_path.starts_with("/usr/lib/honk/") {
++        return ("CUSTOM_UNSUPPORTED", resolved_path, metadata.len(), false);
++    }
++    (
++        if provider == "V2FLY" {
++            "V2FLY_LOCKED"
++        } else {
++            "LOYALSOLDIER_LOCKED"
++        },
++        resolved_path,
++        metadata.len(),
++        true,
++    )
++}
++
++fn live_status(site_sha: &str, ip_sha: &str) -> Value {
++    let path = Path::new("/run/honk/geo-live.json");
++    let Ok(raw) = fs::read_to_string(path) else {
++        return json!({"status":"STALE","matching":false,"path":path.display().to_string()});
++    };
++    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
++        return json!({"status":"STALE","matching":false,"path":path.display().to_string()});
++    };
++    let pid = value.get("pid").and_then(Value::as_u64).unwrap_or(0);
++    let alive = pid > 0 && Path::new(&format!("/proc/{pid}")).exists();
++    let matching = alive
++        && value.get("provider").and_then(Value::as_str) == Some("LOYALSOLDIER_LOCKED")
++        && value.get("geositeSha256").and_then(Value::as_str) == Some(site_sha)
++        && value.get("geoipSha256").and_then(Value::as_str) == Some(ip_sha);
++    json!({"status": if matching {"LOYALSOLDIER_LOCKED"} else {"STALE"}, "matching":matching, "receipt":value})
++}
++
++pub fn run(command: GeoCommand) -> Result<()> {
++    match command.command {
++        GeoSubcommand::Capabilities(args) => capabilities(args),
++        GeoSubcommand::Repair(args) => repair(args),
++    }
++}
++
++fn capabilities(args: CapabilityArgs) -> Result<()> {
++    let dir = asset_dir();
++    let site = dir.join("geosite.dat");
++    let ip = dir.join("geoip.dat");
++    let (disk_status, site_resolved, site_size, site_hash_ok) =
++        status_for(&site, LOCK_SITE_SHA, LOCK_SITE_SIZE, "LOYALSOLDIER");
++    let (ip_status, ip_resolved, ip_size, ip_hash_ok) =
++        status_for(&ip, LOCK_IP_SHA, LOCK_IP_SIZE, "V2FLY");
++    let site_sha = sha256(&site).unwrap_or_default();
++    let ip_sha = sha256(&ip).unwrap_or_default();
++    let labels: Vec<Value> = if site_hash_ok {
++        requested_labels(&site, &args.labels)
++    } else {
++        args.labels
++            .iter()
++            .map(|label| json!({"label": label, "present": false}))
++            .collect()
++    };
++    let geoip_labels: Vec<Value> = if ip_hash_ok {
++        requested_labels(&ip, &args.geoip_labels)
++    } else {
++        args.geoip_labels
++            .iter()
++            .map(|label| json!({"label": label, "present": false}))
++            .collect()
++    };
++    let all_labels = labels
++        .iter()
++        .all(|v| v.get("present").and_then(Value::as_bool).unwrap_or(false));
++    let all_geoip = geoip_labels
++        .iter()
++        .all(|v| v.get("present").and_then(Value::as_bool).unwrap_or(false));
++    let combined_disk_status = if disk_status != "LOYALSOLDIER_LOCKED" {
++        disk_status
++    } else if ip_status != "V2FLY_LOCKED" {
++        if ip_status == "V2FLY_GFW_UNSUPPORTED" {
++            "V2FLY_GFW_UNSUPPORTED"
++        } else {
++            "TAMPERED"
++        }
++    } else {
++        "LOYALSOLDIER_LOCKED"
++    };
++    let active = live_status(&site_sha, &ip_sha);
++    let active_status = active
++        .get("status")
++        .and_then(Value::as_str)
++        .unwrap_or("STALE");
++    let ok = (disk_status == "LOYALSOLDIER_LOCKED"
++        && ip_status == "V2FLY_LOCKED"
++        && all_labels
++        && all_geoip)
++        || (args.labels.is_empty() && args.geoip_labels.is_empty());
++    let output = json!({
++        "schemaVersion":"honk.geo.v1",
++        "ok":ok,
++        "diskStatus": combined_disk_status,
++        "activeStatus":active_status,
++        "configuredPath":dir.display().to_string(),
++        "resolvedPaths":{"geosite":site_resolved,"geoip":ip_resolved},
++        "hashes":{"geosite":site_sha,"geoip":ip_sha},
++        "sizes":{"geosite":site_size,"geoip":ip_size},
++        "lockVersion":"202607312254/202607171233",
++        "provider":"LOYALSOLDIER_LOCKED",
++        "providers":{"geosite":disk_status,"geoip":ip_status},
++        "labels":labels,
++        "geoipLabels":geoip_labels,
++        "live":active
++    });
++    if args.json {
++        println!("{}", serde_json::to_string(&output)?);
++    } else {
++        println!("{}", serde_json::to_string_pretty(&output)?);
++    }
++    if ok {
++        Ok(())
++    } else {
++        Err(anyhow::anyhow!("geo capability check failed"))
++    }
++}
++
++fn repair(args: RepairArgs) -> Result<()> {
++    if !args.confirm {
++        anyhow::bail!("repair requires --confirm")
++    }
++    if unsafe { libc::geteuid() } != 0 {
++        anyhow::bail!("repair requires root")
++    }
++    let payload = Path::new("/usr/lib/honk/geosite.dat");
++    if !payload.is_file()
++        || fs::metadata(payload)?.len() != LOCK_SITE_SIZE
++        || sha256(payload)? != LOCK_SITE_SHA
++    {
++        anyhow::bail!("locked Honk geosite payload is missing or tampered")
++    }
++    let link = Path::new("/usr/share/honk/geosite.dat");
++    fs::create_dir_all(link.parent().context("geosite directory")?)?;
++    let temp = link.with_extension(format!("repair.{}", std::process::id()));
++    let _ = fs::remove_file(&temp);
++    std::os::unix::fs::symlink(payload, &temp)?;
++    fs::rename(&temp, link)?;
++    if let Some(parent) = link.parent()
++        && let Ok(dir) = fs::File::open(parent) {
++        let _ = dir.sync_all();
++    }
++    let output = json!({"ok":true,"repaired":true,"path":link.display().to_string(),"resolvedPath":resolved(link),"diskStatus":"LOYALSOLDIER_LOCKED","activeStatus":"STALE","needsRestart":true});
++    if args.json {
++        println!("{}", serde_json::to_string(&output)?);
++    } else {
++        println!("geosite symlink repaired; restart Honk to activate")
++    }
++    Ok(())
++}
++
++struct ProtoDecoder<'a> {
++    data: &'a [u8],
++    pos: usize,
++}
++
++impl<'a> ProtoDecoder<'a> {
++    fn new(data: &'a [u8]) -> Self {
++        Self { data, pos: 0 }
++    }
++
++    fn is_empty(&self) -> bool {
++        self.pos >= self.data.len()
++    }
++
++    fn read_byte(&mut self) -> io::Result<u8> {
++        if self.pos >= self.data.len() {
++            return Err(io::Error::new(
++                io::ErrorKind::UnexpectedEof,
++                "unexpected end of protobuf data",
++            ));
++        }
++        let byte = self.data[self.pos];
++        self.pos += 1;
++        Ok(byte)
++    }
++
++    fn read_varint(&mut self) -> io::Result<u64> {
++        let mut value = 0u64;
++        let mut shift = 0;
++        loop {
++            let byte = self.read_byte()?;
++            value |= u64::from(byte & 0x7f) << shift;
++            if byte & 0x80 == 0 {
++                return Ok(value);
++            }
++            shift += 7;
++            if shift > 63 {
++                return Err(io::Error::new(
++                    io::ErrorKind::InvalidData,
++                    "protobuf varint overflow",
++                ));
++            }
++        }
++    }
++
++    fn read_tag(&mut self) -> io::Result<(u32, u8)> {
++        let tag = self.read_varint()?;
++        Ok(((tag >> 3) as u32, (tag & 0x7) as u8))
++    }
++
++    fn read_len_delimited(&mut self) -> io::Result<&'a [u8]> {
++        let len = self.read_varint()? as usize;
++        let end = self.pos.checked_add(len).ok_or_else(|| {
++            io::Error::new(io::ErrorKind::InvalidData, "protobuf length overflow")
++        })?;
++        if end > self.data.len() {
++            return Err(io::Error::new(
++                io::ErrorKind::UnexpectedEof,
++                "protobuf field exceeds payload",
++            ));
++        }
++        let value = &self.data[self.pos..end];
++        self.pos = end;
++        Ok(value)
++    }
++
++    fn skip_field(&mut self, wire: u8) -> io::Result<()> {
++        match wire {
++            0 => {
++                self.read_varint()?;
++            }
++            1 => {
++                let end = self.pos.checked_add(8).ok_or_else(|| {
++                    io::Error::new(io::ErrorKind::InvalidData, "protobuf length overflow")
++                })?;
++                if end > self.data.len() {
++                    return Err(io::Error::new(
++                        io::ErrorKind::UnexpectedEof,
++                        "protobuf field exceeds payload",
++                    ));
++                }
++                self.pos = end;
++            }
++            2 => {
++                self.read_len_delimited()?;
++            }
++            5 => {
++                let end = self.pos.checked_add(4).ok_or_else(|| {
++                    io::Error::new(io::ErrorKind::InvalidData, "protobuf length overflow")
++                })?;
++                if end > self.data.len() {
++                    return Err(io::Error::new(
++                        io::ErrorKind::UnexpectedEof,
++                        "protobuf field exceeds payload",
++                    ));
++                }
++                self.pos = end;
++            }
++            _ => {
++                return Err(io::Error::new(
++                    io::ErrorKind::InvalidData,
++                    format!("unsupported protobuf wire type {wire}"),
++                ));
++            }
++        }
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::has_code_bytes;
++
++    #[test]
++    fn decodes_top_level_geo_code_without_substring_matching() {
++        let data = [0x0a, 0x05, 0x0a, 0x03, b'g', b'f', b'w'];
++        assert!(has_code_bytes(&data, "gfw").unwrap());
++        assert!(!has_code_bytes(&data, "fw").unwrap());
++    }
++
++    #[test]
++    fn malformed_dat_is_rejected() {
++        assert!(has_code_bytes(&[0x0a, 0x05, 0x0a], "gfw").is_err());
++    }
++}
+diff --git a/crates/honk-tool/src/main.rs b/crates/honk-tool/src/main.rs
+index c6f313e..57d2d34 100644
+--- a/crates/honk-tool/src/main.rs
++++ b/crates/honk-tool/src/main.rs
+@@ -5,7 +5,9 @@
+ 
+ mod bpf;
+ mod diagnose;
++mod geo;
+ mod sub;
++mod validate;
+ 
+ use clap::{Parser, Subcommand};
+ 
+@@ -25,6 +27,10 @@ enum Command {
+     Bpf(bpf::BpfArgs),
+     /// One-shot health check of a running honk engine.
+     Diagnose(diagnose::DiagnoseArgs),
++    /// Parse and validate a Honk configuration without starting the engine.
++    Validate(validate::ValidateArgs),
++    /// Inspect and repair Honk-owned Geo assets.
++    Geo(geo::GeoCommand),
+ }
+ 
+ #[tokio::main]
+@@ -40,5 +46,7 @@ async fn main() -> anyhow::Result<()> {
+         Command::Sub(args) => sub::run(args).await,
+         Command::Bpf(args) => bpf::run(args).await,
+         Command::Diagnose(args) => diagnose::run(args).await,
++        Command::Validate(args) => validate::run(args),
++        Command::Geo(args) => geo::run(args),
+     }
+ }
+diff --git a/crates/honk-tool/src/validate.rs b/crates/honk-tool/src/validate.rs
+new file mode 100644
+index 0000000..9f0a567
+--- /dev/null
++++ b/crates/honk-tool/src/validate.rs
+@@ -0,0 +1,141 @@
++use anyhow::Result;
++use clap::Args;
++use honk_config::Config;
++use honk_config::dns::{DnsCond, DnsDomainMatcher};
++use serde_json::json;
++use sha2::{Digest, Sha256};
++use std::fs;
++use std::path::PathBuf;
++
++fn hex_digest(bytes: &[u8]) -> String {
++    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
++}
++
++fn diagnostic_code(message: &str) -> (&'static str, i32) {
++    let lower = message.to_ascii_lowercase();
++    if lower.contains("unsupported") || lower.contains("unsafe") {
++        ("UNSAFE", 3)
++    } else {
++        ("SYNTAX", 2)
++    }
++}
++
++fn collect_dns_geo(config: &Config, geosite: &mut Vec<String>, geoip: &mut Vec<String>) {
++    let mut collect_conditions = |conditions: &[DnsCond]| {
++        for condition in conditions {
++            match condition {
++                DnsCond::Qname { matchers, .. } => {
++                    for matcher in matchers {
++                        if let DnsDomainMatcher::Geosite(code) = matcher {
++                            geosite.push(code.clone());
++                        }
++                    }
++                }
++                DnsCond::Ip { geoip: codes, .. } => geoip.extend(codes.iter().cloned()),
++                _ => {}
++            }
++        }
++    };
++    for rule in &config.dns.routing.request.rules {
++        collect_conditions(&rule.conditions);
++    }
++    for rule in &config.dns.routing.response.rules {
++        collect_conditions(&rule.conditions);
++    }
++    for rule in &config.dns.routing.rules {
++        if let Some(code) = rule.domain.strip_prefix("geosite:") {
++            geosite.push(code.to_string());
++        }
++        if let Some(code) = rule.domain.strip_prefix("geoip:") {
++            geoip.push(code.to_string());
++        }
++    }
++    geosite.sort_unstable();
++    geosite.dedup();
++    geoip.sort_unstable();
++    geoip.dedup();
++}
++
++#[derive(Args)]
++pub struct ValidateArgs {
++    /// Configuration path. The path is fixed by the OpenWrt service wrapper.
++    #[arg(long, conflicts_with = "config_fd")]
++    pub config: Option<PathBuf>,
++    /// Read the configuration from an already-open file descriptor.
++    #[arg(long, conflicts_with = "config")]
++    pub config_fd: Option<i32>,
++    /// Logical path used in diagnostics when reading from a file descriptor.
++    #[arg(long, default_value = "<config-fd>")]
++    pub logical_path: String,
++    /// Emit a machine-readable result.
++    #[arg(long)]
++    pub json: bool,
++}
++
++pub fn run(args: ValidateArgs) -> Result<()> {
++    let path = if let Some(fd) = args.config_fd {
++        format!("/proc/self/fd/{fd}")
++    } else {
++        args.config
++            .unwrap_or_else(|| PathBuf::from("/etc/honk/config.dae"))
++            .to_string_lossy()
++            .into_owned()
++    };
++
++    let bytes = match fs::read(&path) {
++        Ok(bytes) => bytes,
++        Err(error) => {
++            if args.json {
++                println!(
++                    "{}",
++                    json!({"schemaVersion":"honk.validate.v1","ok":false,"path":args.logical_path,"configSha256":null,"parserVersion":"honk-config-v1","diagnostics":[{"code":"IO","message":error.to_string()}]})
++                );
++            }
++            std::process::exit(4);
++        }
++    };
++    let mut digest = Sha256::new();
++    digest.update(&bytes);
++    let config_sha = hex_digest(digest.finalize().as_ref());
++    let parsed = Config::from_file(&path);
++    let result = parsed
++        .as_ref()
++        .map_err(|e| e.to_string())
++        .and_then(|config| config.validate().map_err(|e| e.to_string()));
++    match result {
++        Ok(()) => {
++            if args.json {
++                let mut geosite = Vec::new();
++                let mut geoip = Vec::new();
++                if let Ok(config) = parsed {
++                    for rule in &config.routing.rules {
++                        geosite.extend(rule.condition.geosite.iter().cloned());
++                        geoip.extend(rule.condition.geo_ip.iter().cloned());
++                    }
++                    collect_dns_geo(&config, &mut geosite, &mut geoip);
++                }
++                geosite.sort_unstable();
++                geosite.dedup();
++                geoip.sort_unstable();
++                geoip.dedup();
++                println!(
++                    "{}",
++                    json!({"schemaVersion":"honk.validate.v1","ok":true,"path":args.logical_path,"configSha256":config_sha,"parserVersion":"honk-config-v1","geo":{"geosite":geosite,"geoip":geoip},"diagnostics":[]})
++                );
++            } else {
++                println!("configuration is valid: {}", path);
++            }
++            Ok(())
++        }
++        Err(error) => {
++			let (diagnostic, exit_code) = diagnostic_code(&error);
++            if args.json {
++                println!(
++                    "{}",
++                    json!({"schemaVersion":"honk.validate.v1","ok":false,"path":args.logical_path,"configSha256":config_sha,"parserVersion":"honk-config-v1","diagnostics":[{"code":diagnostic,"message":error}]})
++                );
++            }
++            std::process::exit(exit_code);
++        }
++    }
++}
+diff --git a/doc/configuration.en.md b/doc/configuration.en.md
+index 044e62d..a088555 100644
+--- a/doc/configuration.en.md
++++ b/doc/configuration.en.md
+@@ -226,6 +226,7 @@ Group-level knobs without a dae-syntax key keep their defaults: URLTest `toleran
+ | `name('exact')` | Exact name |
+ | `name(keyword: 'pat')` | Substring |
+ | `group('hk')` / `group('hk', 'jp')` | Nested groups |
++| `subscription('tag')` | Nodes fetched from the named subscription |
+ 
+ Rules of thumb:
+ 
+@@ -384,10 +385,20 @@ Upstream URIs take a scheme prefix: `udp://`, `tcp://`, `tcp+udp://`, `tls://`,
+ 
+ ```dae
+ subscription {
+-    my-sub: 'https://example.com/sub'
++    my-sub {
++        url: 'https://example.com/sub'
++        update_interval: 86400
++        enabled: true
++    }
+ }
+ ```
+ 
++The legacy `my-sub: 'https://example.com/sub'` form remains supported. Honk's
++LuCI node selector creates a selector group using `filter:
++subscription('my-sub')`, so fetched nodes can be selected directly or used by
++routing rules. `update_interval: 0` disables periodic refresh while keeping
++manual refresh available.
++
+ Each entry is `tag: 'url'` (a bare quoted URL is also accepted). In dae syntax the subscription type, update interval, and enabled flag keep their defaults (auto/simple, 86400 s, enabled).
+ 
+ - Startup fetch races a short deadline; late results merge via the control-plane channel.
+@@ -409,6 +420,14 @@ experimental {
+ }
+ ```
+ 
++The `GLOBAL` selector is retained for Clash API compatibility and stores one
++primary node selection. LuCI presents it as the **Primary Node** rather than a
++separate proxy group. In `Rule` mode, explicit `direct`, `block`, and `(must)`
++rules keep their routing semantics; all other proxy routes use the primary
++node. `Global` mode uses that same primary node for every eligible flow, while
++`Direct` forces direct egress. The virtual `Proxy` entry keeps the configured
++routing result until a primary node is selected.
++
+ Useful endpoints: `/proxies`, `/proxies/{name}` (PUT selector), `/proxies/{name}/delay`, `/group/{name}/delay`, `/connections`, `/traffic`, `/logs`, `/dns/query`, `/stats`.
+ 
+ Env: `HONK_UI_DOWNLOAD_URL` overrides the default zashboard zip URL when `external_ui` is empty/missing.

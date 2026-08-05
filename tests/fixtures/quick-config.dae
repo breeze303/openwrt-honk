@@ -1,0 +1,22 @@
+# honk-quick-setup: v1
+# keep this comment and the quoted brace: "{not-a-section}"
+global {
+	lan_interface: 'br-lan'
+	wan_interface: 'eth0.2'
+}
+node {
+	alpha-static: 'direct://'
+}
+subscription {
+	alpha {
+		url: 'https://subscriber.invalid/alpha?token=REDACTED'
+	}
+	beta {
+		url: 'https://subscriber.invalid/beta?token=REDACTED'
+	}
+}
+experimental {
+	cache_file {
+		enabled: true
+	}
+}

@@ -12,11 +12,16 @@ jobs:
       - name: Install test tools
         run: sudo apt-get update && sudo apt-get install -y jq lua5.4
       - name: Restore locked source archive
+        shell: bash
         run: |
+          set -euo pipefail
+          archive_path=$(jq -er '.source.archive.offlinePath' locks/source.lock.json)
+          archive_url=$(jq -er '.source.archive.url' locks/source.lock.json)
+          archive_sha256=$(jq -er '.source.archive.sha256' locks/source.lock.json)
           mkdir -p .cache/dl
-          curl --fail --location --output .cache/dl/honk-63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz \
-            https://github.com/Glassyiris/honk/archive/63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz
-          echo 'e957a69654219712dadf8f9a6f3a7774fd9dccf57c585fe460122a1d259fe871  .cache/dl/honk-63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz' | sha256sum -c -
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 5 --retry-all-errors \
+            --output "$archive_path" "$archive_url"
+          printf '%s  %s\n' "$archive_sha256" "$archive_path" | sha256sum -c -
       - run: bash tests/run-tests.sh
 
   dashboard:
@@ -27,7 +32,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: luci-app-honk/ui/package-lock.json
-      - working-directory: luci-app-honk/ui
-        run: npm ci && npm run build
-      - run: git diff --exit-code -- luci-app-honk/root/www/luci-static/resources/honk/dashboard
+          cache-dependency-path: |
+            luci-app-honk/ui/package-lock.json
+            luci-app-honk-legacy/ui/package-lock.json
+      - name: Provision locked UI cache
+        run: .github/scripts/provision-ui-cache.sh --lock luci-app-honk/ui/package-lock.json --cache .cache/npm --evidence .cache/evidence/dashboard-cache.json
+      - name: Build dashboard offline
+        run: env HOME="$RUNNER_TEMP/honk-ui-home" npm_config_cache="$PWD/.cache/npm" npm ci --offline --ignore-scripts --prefix luci-app-honk/ui && env HOME="$RUNNER_TEMP/honk-ui-home" npm_config_cache="$PWD/.cache/npm" npm run build --prefix luci-app-honk/ui
+      - name: Build legacy dashboard offline
+        run: env HOME="$RUNNER_TEMP/honk-ui-home" npm_config_cache="$PWD/.cache/npm" npm ci --offline --ignore-scripts --prefix luci-app-honk-legacy/ui && env HOME="$RUNNER_TEMP/honk-ui-home" npm_config_cache="$PWD/.cache/npm" npm run build --prefix luci-app-honk-legacy/ui
+      - run: .github/scripts/check-dashboard-assets.sh --manifest .cache/evidence/dashboard-assets.json
+      - run: .github/scripts/check-dashboard-assets.sh --app-dir "$PWD/luci-app-honk-legacy/root/www/luci-static/resources/honk-legacy/app" --manifest .cache/evidence/legacy-dashboard-assets.json
+      - run: git diff --exit-code -- luci-app-honk/root/www/luci-static/resources/honk/app
+      - run: git diff --exit-code -- luci-app-honk-legacy/root/www/luci-static/resources/honk-legacy/app

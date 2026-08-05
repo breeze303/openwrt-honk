@@ -2,7 +2,6 @@
 set -euo pipefail
 set +x
 
-readonly expected_commit=63e271065246bb68ecadf9ae53abecf748806ad3
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 lock="$repo_root/locks/source.lock.json"
 requested_commit=''
@@ -19,7 +18,7 @@ while [ "$#" -gt 0 ]; do
 		--check-archive) check_archive=true; shift ;;
 		--check-mirror-hash) check_mirror_hash=true; shift ;;
 		--receipt-dir) receipt_dir=$2; shift 2 ;;
-		*) printf 'usage: %s --commit SHA [--lock FILE] [--check-tree] [--check-archive] [--check-mirror-hash]\n' "$0" >&2; exit 64 ;;
+		*) printf 'usage: %s [--commit SHA] [--lock FILE] [--check-tree] [--check-archive] [--check-mirror-hash]\n' "$0" >&2; exit 64 ;;
 	esac
 done
 
@@ -28,22 +27,38 @@ fail() {
 	exit 1
 }
 
-[ "$requested_commit" = "$expected_commit" ] || fail 'requested commit is not the frozen commit'
+expected_commit=$(jq -er '.source.commit | select(test("^[0-9a-f]{40}$"))' "$lock") || fail 'lock has no immutable source commit'
+if [ -n "$requested_commit" ] && [ "$requested_commit" != "$expected_commit" ]; then
+	fail 'requested commit does not match the source lock'
+fi
 jq -e --arg commit "$expected_commit" '
 	.schemaVersion == 1 and
 	.source.canonicalUrl == "https://github.com/Glassyiris/honk.git" and
 	.source.commit == $commit and
 	.source.commit != "dev" and
 	(.source.tree | test("^[0-9a-f]{40}$")) and
-	.source.tagObservation.name == "v0.0.1.beta.25" and
-	.source.tagObservation.signatureStatus == "unsigned" and
-	(.source.archive.url | test("^https://github\\.com/Glassyiris/honk/archive/[0-9a-f]{40}\\.tar\\.gz$")) and
+	((.source.tagObservation.name == null) or (.source.tagObservation.name | type == "string" and length > 0)) and
+	.source.tagObservation.object == $commit and
+	(.source.tagObservation.signatureStatus | type == "string" and length > 0) and
+	.source.archive.url == ("https://github.com/Glassyiris/honk/archive/" + $commit + ".tar.gz") and
 	(.source.archive.sha256 | test("^[0-9a-f]{64}$")) and
 	(.source.archive.size | type == "number" and . > 0) and
-	(.source.archive.topLevelDirectory | type == "string" and length > 0) and
-	(.source.archive.offlinePath | test("^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/-]+$")) and
-	(.source.patchDigests | type == "array")
+	.source.archive.topLevelDirectory == ("honk-" + $commit) and
+	.source.archive.offlinePath == (".cache/dl/honk-" + $commit + ".tar.gz") and
+	.source.license.sourceLicenseUrl == ("https://github.com/Glassyiris/honk/blob/" + $commit + "/LICENSE") and
+	(.source.patchDigests | type == "array" and length > 0) and
+	([.source.patchDigests[].path] | length == (unique | length))
 ' "$lock" >/dev/null || fail 'schema or immutable-source fields are invalid'
+
+while IFS=$'\t' read -r patch_path patch_sha; do
+	case "$patch_path" in
+		honk/patches/*.patch) ;;
+		*) fail "invalid patch path: $patch_path" ;;
+	esac
+	patch_file="$repo_root/$patch_path"
+	[ -f "$patch_file" ] || fail "locked patch is missing: $patch_path"
+	[ "$(sha256sum "$patch_file" | cut -d ' ' -f 1)" = "$patch_sha" ] || fail "patch digest mismatch: $patch_path"
+done < <(jq -r '.source.patchDigests[] | [.path, .sha256] | @tsv' "$lock")
 
 archive_rel=$(jq -er '.source.archive.offlinePath' "$lock")
 archive="$repo_root/$archive_rel"

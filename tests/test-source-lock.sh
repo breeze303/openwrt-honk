@@ -2,7 +2,8 @@
 set -euo pipefail
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-readonly commit=63e271065246bb68ecadf9ae53abecf748806ad3
+readonly commit=$(jq -er '.source.commit' "$repo_root/locks/source.lock.json")
+readonly source_archive=$(jq -er '.source.archive.offlinePath' "$repo_root/locks/source.lock.json")
 tmp=$(mktemp -d)
 assertions=0
 
@@ -31,7 +32,7 @@ must_fail floating-dev "$repo_root/.github/scripts/verify-source-lock.sh" --comm
 jq '.source.tree = "0000000000000000000000000000000000000000"' "$repo_root/locks/source.lock.json" >"$tmp/wrong-tree.json"
 must_fail wrong-tree "$repo_root/.github/scripts/verify-source-lock.sh" --commit "$commit" --lock "$tmp/wrong-tree.json" --check-tree
 
-dd if="$repo_root/.cache/dl/honk-$commit.tar.gz" of="$repo_root/.cache/dl/test-truncated.tar.gz" bs=64 count=1 status=none
+dd if="$repo_root/$source_archive" of="$repo_root/.cache/dl/test-truncated.tar.gz" bs=64 count=1 status=none
 truncated_sha=$(sha256sum "$repo_root/.cache/dl/test-truncated.tar.gz" | cut -d ' ' -f 1)
 jq --arg sha "$truncated_sha" '.source.archive.offlinePath = ".cache/dl/test-truncated.tar.gz" | .source.archive.sha256 = $sha | .source.archive.size = 64' "$repo_root/locks/source.lock.json" >"$tmp/truncated.json"
 must_fail truncated-archive "$repo_root/.github/scripts/verify-source-lock.sh" --commit "$commit" --lock "$tmp/truncated.json" --check-archive

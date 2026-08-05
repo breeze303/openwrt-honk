@@ -1,4 +1,5 @@
 <%+header%>
-<iframe class="honk-app" src="/luci-static/resources/honk/app/index.html?v=20260731-topology4" title="<%:Honk 管理面板%>"></iframe>
-<style>.honk-app{display:block;width:100%;height:calc(100dvh - 72px);min-height:680px;border:0;background:transparent}#floating-toolbar,.floating-toolbar{display:none!important}@media(max-width:720px){.honk-app{height:calc(100dvh - 62px);min-height:620px}}</style>
+<meta name="csrf-token" content="<%=token%>">
+<iframe class="honk-app" src="/luci-static/resources/honk/app/index.html?v=20260804-v12" title="<%:代理管理面板%>"></iframe>
+<style>.honk-app{display:block;width:100%;height:calc(100dvh - 72px);min-height:640px;border:0;background:#f5f7f9}#floating-toolbar,.floating-toolbar{display:none!important}@media(max-width:720px){.honk-app{height:calc(100dvh - 62px);min-height:620px}}</style>
 <%+footer%>

@@ -6,6 +6,7 @@ lock_dir="$repo_root/locks"
 dl_dir="$repo_root/.cache/dl"
 offline=false
 check=false
+stage_dir=''
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
@@ -13,6 +14,7 @@ while [ "$#" -gt 0 ]; do
 		--dl-dir) dl_dir=$2; shift 2 ;;
 		--offline) offline=true; shift ;;
 		--check) check=true; shift ;;
+		--stage-dir) stage_dir=$2; shift 2 ;;
 		*) printf 'usage: %s --lock-dir DIR --dl-dir DIR [--offline] [--check]\n' "$0" >&2; exit 64 ;;
 	esac
 done
@@ -33,6 +35,16 @@ for name in $required; do
 			(.source.provenance.providerPath | type == "string" and length > 0) and
 			(.source.archive.offlinePath | type == "string" and length > 0)
 		' "$lock" >/dev/null || { printf 'invalid lock schema: %s\n' "$name" >&2; exit 1; }
+	elif [ "$name" = geo ]; then
+		jq -e '
+			.schemaVersion == 2 and
+			.contract.availability == "available" and
+			.contract.activeDirectory == "/usr/share/honk" and
+			.contract.runtimeDependency == false and
+			([.contract.neverTouch[]] | index("/usr/share/v2ray/geosite.dat")) != null and
+			([.assets[] | select(.kind == "geosite" and .provider == "LOYALSOLDIER" and .release == "202607312254" and .sha256 == "1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f" and .labels == ["gfw", "cn", "private"])] | length == 1) and
+			([.assets[] | select(.kind == "geoip" and .provider == "V2FLY" and .release == "202607171233" and .sha256 == "b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a" and (.architectures | sort == ["aarch64", "x86_64"]))] | length == 1)
+		' "$lock" >/dev/null || { printf 'invalid geo asset lock\n' >&2; exit 1; }
 	else
 		jq -e '
 			.schemaVersion == 1 and
@@ -66,6 +78,23 @@ for name in $required; do
 		blocked="$blocked $name"
 	fi
 done
+
+geo_lock="$lock_dir/geo.lock.json"
+while IFS=$'\t' read -r cache_path expected_sha expected_size; do
+	[ -n "$cache_path" ] || continue
+	asset="$dl_dir/$(basename "$cache_path")"
+	if [ ! -f "$asset" ]; then
+		asset="$repo_root/$cache_path"
+	fi
+	[ -f "$asset" ] || { printf 'locked geo asset is missing: %s\n' "$cache_path" >&2; exit 1; }
+	[ "$(stat -c '%s' "$asset")" = "$expected_size" ] || { printf 'locked geo asset size mismatch: %s\n' "$cache_path" >&2; exit 1; }
+	[ "$(sha256sum "$asset" | cut -d ' ' -f 1)" = "$expected_sha" ] || { printf 'locked geo asset hash mismatch: %s\n' "$cache_path" >&2; exit 1; }
+	if [ -n "$stage_dir" ]; then
+		mkdir -p "$stage_dir"
+		cp "$asset" "$stage_dir/$(basename "$cache_path")"
+		chmod 444 "$stage_dir/$(basename "$cache_path")"
+	fi
+done < <(jq -r '.assets[] | [.cachePath, .sha256, (.size|tostring)] | @tsv' "$geo_lock")
 
 source_archive=$(jq -er '.source.archive.offlinePath' "$lock_dir/source.lock.json")
 source_sha=$(jq -er '.source.archive.sha256' "$lock_dir/source.lock.json")

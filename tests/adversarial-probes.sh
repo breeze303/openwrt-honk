@@ -3,7 +3,7 @@ set -euo pipefail
 set +x
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-readonly commit=63e271065246bb68ecadf9ae53abecf748806ad3
+readonly commit=$(jq -er '.source.commit' "$repo_root/locks/source.lock.json")
 plan=/home/breeze/honk-dev/.omo/plans/honk-openwrt-daemon-luci.md
 evidence=/home/breeze/honk-dev/.omo/evidence/honk-openwrt-daemon-luci/01
 tmp=$(mktemp -d)

@@ -7,17 +7,61 @@ STOP=10
 NAME=honk
 PROG=/usr/bin/honk-core
 CONFIG=/etc/honk/config.dae
+DEFAULT_CONFIG=/etc/honk/config.dae.default
 PIN_ROOT=/sys/fs/bpf/honk
 LAUNCHER=/usr/libexec/honk/honk-launcher
 LOG_DIR=/tmp/honk
 LOG_FILE=$LOG_DIR/honk.log
+RUN_DIR=/run/honk
+ASSET_DIR=/usr/share/honk
+LIVE_RECEIPT=$RUN_DIR/geo-live.json
+ASSET_RECEIPT=$RUN_DIR/geo-assets.json
 
 validate_config() {
 	[ -r "$CONFIG" ] || {
 		logger -t honk "configuration is missing: $CONFIG"
 		return 1
 	}
-	VALIDATION_ERROR="$(/usr/bin/honk-tool validate --config "$CONFIG" --json 2>&1)" || return 1
+	mkdir -p "$RUN_DIR" || return 1
+	VALIDATION_ERROR="$(/usr/bin/honk-tool validate --config "$CONFIG" --json 2>&1)"
+	local validation_status=$?
+	printf '%s\n' "$VALIDATION_ERROR" >"$RUN_DIR/config-validation.json" || return 1
+	chmod 600 "$RUN_DIR/config-validation.json"
+	return "$validation_status"
+}
+
+ensure_config() {
+	[ -r "$CONFIG" ] && return 0
+	[ -r "$DEFAULT_CONFIG" ] || {
+		logger -t honk "configuration is missing and default template is unavailable: $CONFIG"
+		return 1
+	}
+	umask 077
+	cp "$DEFAULT_CONFIG" "$CONFIG" || return 1
+	chmod 600 "$CONFIG" || return 1
+	logger -t honk "initialized missing configuration from $DEFAULT_CONFIG"
+}
+
+validate_geo_assets() {
+	local result geosite_labels geoip_labels
+	geosite_labels="$(printf '%s\n' "$VALIDATION_ERROR" | jq -r '[.geo.geosite[]? | tostring | split("@")[0] | select(. != "")] | unique | join(",")' 2>/dev/null || true)"
+	geoip_labels="$(printf '%s\n' "$VALIDATION_ERROR" | jq -r '[.geo.geoip[]? | tostring | split("@")[0] | select(. != "")] | unique | join(",")' 2>/dev/null || true)"
+	if [ -z "$geosite_labels" ] && [ -z "$geoip_labels" ]; then
+		printf '%s\n' '{"schemaVersion":"honk.geo-assets.v1","ok":true,"skipped":true,"reason":"NO_GEO_REFERENCES"}' >"$ASSET_RECEIPT"
+		chmod 600 "$ASSET_RECEIPT"
+		return 0
+	fi
+	set -- --json
+	[ -z "$geosite_labels" ] || set -- "$@" --labels "$geosite_labels"
+	[ -z "$geoip_labels" ] || set -- "$@" --geoip-labels "$geoip_labels"
+	result="$(DAE_LOCATION_ASSET="$ASSET_DIR" /usr/bin/honk-tool geo capabilities "$@" 2>&1)" || {
+		printf '%s\n' "$result" >"$ASSET_RECEIPT"
+		chmod 600 "$ASSET_RECEIPT"
+		logger -t honk "geo asset preflight failed: $result"
+		return 1
+	}
+	printf '%s\n' "$result" >"$ASSET_RECEIPT"
+	chmod 600 "$ASSET_RECEIPT"
 	return 0
 }
 
@@ -25,12 +69,34 @@ start_service() {
 	local respawn
 	config_load honk
 	config_get_bool respawn main respawn 1
+	mkdir -p "$RUN_DIR" || return 1
+	if [ -x /usr/libexec/honk/quick-transaction-worker ]; then
+		HONK_QUICK_RECOVERY_FROM_INIT=1 /usr/libexec/honk/quick-transaction-worker --recover >/run/honk/quick-recovery.json 2>&1 || {
+			logger -t honk "Quick Setup recovery failed"
+			return 1
+		}
+		chmod 600 /run/honk/quick-recovery.json
+	fi
 	if pidof dae daed >/dev/null 2>&1; then
 		logger -t honk "dae/daed is active; refusing to reuse its fixed runtime resources"
 		return 1
 	fi
+	ensure_config || return 1
+	# Resolve only the untouched package template. Customized configurations keep
+	# their explicit interface choices across restarts and package upgrades.
+	if [ -x /usr/libexec/honk/interface-discovery ] && cmp -s "$CONFIG" "$DEFAULT_CONFIG"; then
+		/usr/libexec/honk/interface-discovery --apply "$CONFIG" "$DEFAULT_CONFIG" "$RUN_DIR/interface-discovery.json" >/dev/null 2>&1 || true
+	fi
 	validate_config || {
 		logger -t honk "configuration validation failed: $VALIDATION_ERROR"
+		return 1
+	}
+	CONFIG_SHA_BEFORE="$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" || return 1
+	# Remove a receipt from a previous process before checking the new config.
+	rm -f "$LIVE_RECEIPT"
+	validate_geo_assets || return 1
+	[ "$CONFIG_SHA_BEFORE" = "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" ] || {
+		logger -t honk "configuration changed during preflight; refusing to start"
 		return 1
 	}
 	mkdir -p "$PIN_ROOT" || return 1
@@ -40,7 +106,7 @@ start_service() {
 
 	procd_open_instance "$NAME"
 	procd_set_param command "$LAUNCHER" --config "$CONFIG" --bpf-pin-root "$PIN_ROOT"
-	procd_set_param env DAE_LOCATION_ASSET=/usr/share/v2ray
+	procd_set_param env DAE_LOCATION_ASSET="$ASSET_DIR"
 	[ "$respawn" -eq 1 ] && procd_set_param respawn 3600 5 5
 	procd_set_param limits nofile="65536 65536"
 	procd_close_instance
@@ -48,6 +114,7 @@ start_service() {
 
 stop_service() {
 	# Honk owns and cleans its TC/eBPF resources during shutdown.
+	rm -f "$LIVE_RECEIPT"
 	return 0
 }
 

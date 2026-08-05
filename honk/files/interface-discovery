@@ -1,0 +1,97 @@
+#!/bin/sh
+
+set -eu
+
+CONFIG=${2:-/etc/honk/config.dae}
+DEFAULT=${3:-/etc/honk/config.dae.default}
+OUTPUT=${4:-/run/honk/interface-discovery.json}
+TMPDIR=$(mktemp -d /tmp/honk-interface-discovery.XXXXXX)
+trap 'rm -rf "$TMPDIR"' EXIT INT TERM
+
+write_output() {
+	mkdir -p "$(dirname "$OUTPUT")"
+	printf '%s\n' "$1" >"$OUTPUT"
+	chmod 600 "$OUTPUT"
+}
+
+discover() {
+	local dump item logical l3 status present up addresses routes best kind reasons
+	dump=$(ubus call network.interface dump 2>/dev/null) || {
+		printf '%s\n' '{"ok":false,"interfaces":[],"candidates":[],"recommended":{},"ambiguous":true,"error":"UBUS_UNAVAILABLE"}'
+		return 1
+	}
+	printf '%s\n' "$dump" | jq -c '.interface[]?' >"$TMPDIR/interfaces"
+: >"$TMPDIR/items"
+	while IFS= read -r item; do
+		[ -n "$item" ] || continue
+		logical=$(printf '%s\n' "$item" | jq -r '.interface // .name // ""')
+		l3=$(printf '%s\n' "$item" | jq -r '.l3_device // ""')
+		status='{}'
+		if [ -n "$l3" ]; then status=$(ubus call network.device status "{\"name\":\"$l3\"}" 2>/dev/null || printf '%s\n' '{}'); fi
+		present=$(printf '%s\n' "$status" | jq -r 'if .present == false then false elif .present == true or .exists == true then true else true end')
+		up=$(printf '%s\n' "$status" | jq -r 'if .up == false then false else true end')
+		addresses=$(printf '%s\n' "$item" | jq -c '[. ["ipv4-address"][]? | {family:"ipv4", address:.address, prefix:(.mask // 0)}] + [. ["ipv6-address"][]? | {family:"ipv6", address:.address, prefix:(.mask // 0)}]')
+		routes=$(printf '%s\n' "$item" | jq -c '[.route[]? | select((.target // .dest) == "0.0.0.0" or (.target // .dest) == "::" or (.target // .dest) == "0.0.0.0/0" or (.target // .dest) == "::/0") | {family:(if ((.target // .dest) | contains(":")) then "ipv6" else "ipv4" end), metric:(.metric // 0), gateway:(.nexthop // .gateway // "")}]')
+		best=$(printf '%s\n' "$routes" | jq -c 'sort_by(.metric) | .[0] // null')
+		kind=$(printf '%s\n' "$status" | jq -r --arg n "$l3" 'if .bridge == true or ($n | startswith("br-")) then "bridge" elif ($n | contains(".")) then "vlan" elif ($n | startswith("ppp") or ($n | startswith("tun")) or ($n | startswith("wg"))) then "tunnel" else "device" end')
+		reasons=$(printf '%s\n' "$item" | jq -c --arg l3 "$l3" --argjson present "$present" --argjson up "$up" '([select($l3 == "") | "L3_DEVICE_MISSING"] + [select(($present|not)) | "DEVICE_MISSING"] + [select(($up|not)) | "DEVICE_DOWN"] + [select((.route // [] | map(select((.target // .dest) == "0.0.0.0" or (.target // .dest) == "::" or (.target // .dest) == "0.0.0.0/0" or (.target // .dest) == "::/0")) | length) > 1) | "MULTIPLE_DEFAULT_ROUTES"])')
+		jq -cn --arg logical "$logical" --arg l3 "$l3" --arg device "$(printf '%s\n' "$item" | jq -r '.device // ""')" \
+			--arg parent "$(printf '%s\n' "$status" | jq -r '.parent // ""')" --arg kind "$kind" \
+			--argjson addresses "$addresses" --argjson routes "$routes" --argjson best "$best" \
+			--argjson present "$present" --argjson up "$up" --argjson reasons "$reasons" \
+			'{logicalName:$logical,l3Device:$l3,device:$device,parent:$parent,kind:$kind,addresses:$addresses,defaultRoutes:$routes,defaultRoute:$best,present:$present,up:$up,reasonCodes:$reasons,safe:($l3 != "" and $present and $up),selectedBy:(if $logical == "lan" then "lan" elif $best != null then "default-route" else "none" end)}' >>"$TMPDIR/items"
+	done <"$TMPDIR/interfaces"
+	local interfaces
+	interfaces=$(jq -s '.' "$TMPDIR/items")
+	jq -cn --argjson interfaces "$interfaces" '
+		($interfaces | map(select(.safe and .l3Device != "" and .l3Device != "lo"))) as $candidates |
+		([$candidates[] | select(.logicalName == "lan" and (.addresses | length) > 0)] | .[0]) as $lan |
+		([$candidates[] | select(.defaultRoute != null)] | sort_by(.defaultRoute.metric) | .[0]) as $wan |
+		{ok:true, interfaces:$interfaces, candidates:$candidates,
+		 recommended:{lan:($lan.l3Device // null), wan:($wan.l3Device // null)},
+		 ambiguous:($lan == null or $wan == null or $lan.l3Device == $wan.l3Device),
+		 reasonCodes:(if ($lan == null or $wan == null or $lan.l3Device == $wan.l3Device) then ["INTERFACE_AMBIGUOUS"] else [] end)}'
+}
+
+if [ "${1:-}" != "--apply" ]; then
+	result=$(discover) || true
+	write_output "$result"
+	printf '%s\n' "$result"
+	exit 0
+fi
+
+if ! cmp -s "$CONFIG" "$DEFAULT"; then
+	result=$(jq -cn '{ok:true,applied:false,skipped:true,reason:"CONFIG_CUSTOMIZED"}')
+	write_output "$result"
+	printf '%s\n' "$result"
+	exit 0
+fi
+
+result=$(discover) || true
+write_output "$result"
+if ! printf '%s\n' "$result" | jq -e '.ok == true and .ambiguous == false' >/dev/null 2>&1; then
+	logger -t honk "interface discovery kept auto interfaces: $(printf '%s\n' "$result" | tr '\n' ' ')"
+	exit 0
+fi
+
+lan=$(printf '%s\n' "$result" | jq -r '.recommended.lan')
+wan=$(printf '%s\n' "$result" | jq -r '.recommended.wan')
+awk -v lan="$lan" -v wan="$wan" '
+BEGIN { in_global = 0 }
+{
+	if (!in_global && $0 ~ /^[[:space:]]*global[[:space:]]*\{/) { in_global = 1; print; next }
+	if (in_global && $0 ~ /^[[:space:]]*lan_interface[[:space:]]*:/) { match($0, /^[[:space:]]*/); print substr($0, 1, RLENGTH) "lan_interface: '\''" lan "'\''"; next }
+	if (in_global && $0 ~ /^[[:space:]]*wan_interface[[:space:]]*:/) { match($0, /^[[:space:]]*/); print substr($0, 1, RLENGTH) "wan_interface: '\''" wan "'\''"; next }
+	print
+	if (in_global && $0 ~ /^[[:space:]]*\}/) in_global = 0
+}' "$CONFIG" >"$TMPDIR/config"
+
+if ! /usr/bin/honk-tool validate --config "$TMPDIR/config" --json >/dev/null 2>&1; then
+	logger -t honk "interface discovery produced an invalid configuration"
+	exit 0
+fi
+chmod 600 "$TMPDIR/config"
+mv "$TMPDIR/config" "$CONFIG"
+result=$(printf '%s\n' "$result" | jq -c --arg lan "$lan" --arg wan "$wan" '. + {applied:true, interfaces:{lan:$lan,wan:$wan}}')
+write_output "$result"
+printf '%s\n' "$result"

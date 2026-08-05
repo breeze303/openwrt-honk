@@ -24,12 +24,12 @@ printf 'src-link %s %s\n' "$feed_name" "$feed_dir" >>feeds.conf
 
 ./scripts/feeds update -a
 ./scripts/feeds install -p "$feed_name" -f luci-app-honk
+./scripts/feeds install -p "$feed_name" -f luci-app-honk-legacy
 make defconfig
 make "package/luci-app-honk/download" V=s
-make \
-	-j"$(nproc)" \
-	CONFIG_AUTOREMOVE=y \
-	"package/luci-app-honk/compile" V=s
+make "package/luci-app-honk-legacy/download" V=s
+make -j"$(nproc)" CONFIG_AUTOREMOVE=y "package/luci-app-honk/compile" V=s
+make -j"$(nproc)" CONFIG_AUTOREMOVE=y "package/luci-app-honk-legacy/compile" V=s
 
 mkdir -p "$artifacts_dir"
 cp -a bin "$artifacts_dir/"

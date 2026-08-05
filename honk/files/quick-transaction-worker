@@ -1,0 +1,149 @@
+#!/bin/sh
+set -eu
+umask 077
+
+# Package-owned Quick Setup transaction and recovery authority.
+CONFIG=${HONK_QUICK_CONFIG:-/etc/honk/config.dae}
+STATE_DIR=${HONK_QUICK_STATE_DIR:-/var/lib/honk}
+JOURNAL=$STATE_DIR/quick-transaction.json
+SIDECAR=$STATE_DIR/quick-transaction.previous
+LOCK=$STATE_DIR/quick-transaction.lock
+HONK_TOOL=${HONK_QUICK_TOOL:-/usr/bin/honk-tool}
+HONK_INIT=${HONK_QUICK_INIT:-/etc/init.d/honk}
+
+json_error() {
+	printf '{"ok":false,"error":{"code":"%s","message":"%s"}}\n' "$1" "$2"
+}
+
+hash_file() { sha256sum "$1" | awk '{print $1}'; }
+
+sync_parent() {
+	# sync -d is available in BusyBox; a best-effort directory sync keeps the
+	# journal/sidecar rename durable without making recovery depend on fsync(2).
+	sync -d "${1%/*}" 2>/dev/null || sync
+}
+
+safe_file() {
+	[ -f "$1" ] || return 1
+	[ ! -L "$1" ] || return 1
+	if [ "${HONK_QUICK_ALLOW_NONROOT:-0}" != 1 ]; then
+		[ "$(stat -c '%u' "$1")" = "0" ] || return 1
+	fi
+	[ "$(stat -c '%a' "$1")" = "600" ] || return 1
+}
+
+write_journal() {
+	local stage=$1 tmp="$JOURNAL.tmp.$$"
+	jq --arg stage "$stage" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.stage=$stage | .updatedAt=$updated | .stageHistory=((.stageHistory // []) + [$stage])' "$JOURNAL" >"$tmp"
+	chmod 600 "$tmp"
+	mv -f "$tmp" "$JOURNAL"
+	sync_parent "$JOURNAL"
+}
+
+restore_service_state() {
+	case "$1" in
+		true) "$HONK_INIT" restart >/dev/null 2>&1 ;;
+		false) "$HONK_INIT" stop >/dev/null 2>&1 ;;
+		*) return 1 ;;
+	esac
+}
+
+start_candidate() {
+	case "$1" in
+		true) "$HONK_INIT" restart >/dev/null 2>&1 ;;
+		false) "$HONK_INIT" start >/dev/null 2>&1 ;;
+		*) return 1 ;;
+	esac
+}
+
+recover() {
+	[ -f "$JOURNAL" ] || { printf '{"ok":true,"recovered":false,"stage":"none"}\n'; return 0; }
+	local stage expected tmp previous_running
+	mkdir -p "$STATE_DIR"
+	exec 9>"$LOCK"
+	flock -n 9 || { json_error TRANSACTION_BUSY "another Quick Setup transaction is active"; return 1; }
+	stage=$(jq -r '.stage // ""' "$JOURNAL")
+	case "$stage" in committed|restored|degraded) printf '{"ok":true,"recovered":false,"stage":"%s"}\n' "$stage"; return 0 ;; esac
+	if ! safe_file "$SIDECAR"; then write_journal degraded; json_error ROLLBACK "previous sidecar ownership check failed"; return 1; fi
+	expected=$(jq -r '.previousSha256 // ""' "$JOURNAL")
+	[ -n "$expected" ] && [ "$(hash_file "$SIDECAR")" = "$expected" ] || { write_journal degraded; json_error ROLLBACK "previous sidecar hash mismatch"; return 1; }
+	write_journal rollback-in-progress
+	tmp="$CONFIG.restore.$$"
+	cp "$SIDECAR" "$tmp"; chmod 600 "$tmp"
+	"$HONK_TOOL" validate --config "$tmp" --json >/dev/null 2>&1 || { write_journal degraded; json_error ROLLBACK "previous configuration failed validation"; return 1; }
+	mv -f "$tmp" "$CONFIG"
+	sync_parent "$CONFIG"
+	previous_running=$(jq -r 'if has("previousRunning") then .previousRunning else true end' "$JOURNAL")
+	if [ "${HONK_QUICK_RECOVERY_FROM_INIT:-0}" = 1 ]; then
+		# init is already in the process of bringing the service up.  It will
+		# consume the restored bytes below, so invoking init recursively here
+		# would create a recovery loop.
+		:
+	elif ! restore_service_state "$previous_running"; then
+		write_journal degraded
+		json_error ROLLBACK "previous service state could not be restored"
+		return 1
+	fi
+	write_journal restored
+	rm -f "$SIDECAR"
+	printf '{"ok":true,"recovered":true,"stage":"restored"}\n'
+}
+
+apply_candidate() {
+	local candidate=$1 expected=$2 nonce=$3 tmp
+	mkdir -p "$STATE_DIR"
+	exec 9>"$LOCK"
+	flock -n 9 || { json_error TRANSACTION_BUSY "another Quick Setup transaction is active"; return 1; }
+	safe_file "$candidate" || { json_error CANDIDATE_OWNERSHIP "candidate must be root-owned mode 600"; return 1; }
+	[ "$(hash_file "$CONFIG")" = "$expected" ] || { json_error REVISION_CONFLICT "configuration changed"; return 1; }
+	"$HONK_TOOL" validate --config "$candidate" --json >/dev/null 2>&1 || { json_error INVALID_CONFIG "candidate failed validation"; return 1; }
+	cp "$CONFIG" "$SIDECAR"; chmod 600 "$SIDECAR"
+	previous_running=${HONK_QUICK_PREVIOUS_RUNNING:-$(pidof honk-core >/dev/null 2>&1 && echo true || echo false)}
+	printf '{"schemaVersion":"honk.quick-transaction.v1","nonce":"%s","candidateSha256":"%s","previousSha256":"%s","stage":"prepared","stageHistory":["prepared"],"previousRunning":%s}\n' "$nonce" "$(hash_file "$candidate")" "$(hash_file "$CONFIG")" "$previous_running" >"$JOURNAL"
+	chmod 600 "$JOURNAL"; sync
+	write_journal candidate-written
+	tmp="$CONFIG.candidate.$$"; cp "$candidate" "$tmp"; chmod 600 "$tmp"; mv -f "$tmp" "$CONFIG"
+	sync_parent "$CONFIG"
+	write_journal service-transition
+	if ! start_candidate "$previous_running"; then
+		write_journal rollback-in-progress
+		cp "$SIDECAR" "$CONFIG"; chmod 600 "$CONFIG"; sync_parent "$CONFIG"
+		if restore_service_state "$previous_running"; then
+			write_journal restored
+		else
+			write_journal degraded
+			json_error ROLLBACK "previous service state could not be restored"
+			return 1
+		fi
+		rm -f "$SIDECAR"
+		json_error ROLLBACK "service transition failed"
+		return 1
+	fi
+	write_journal waiting-subscription
+	write_journal probing
+	if [ -x "$HONK_TOOL" ] && [ -n "${HONK_QUICK_PROBE:-}" ]; then
+		if ! "$HONK_TOOL" geo capabilities --json >/dev/null 2>&1; then
+			write_journal rollback-in-progress
+			cp "$SIDECAR" "$CONFIG"; chmod 600 "$CONFIG"; sync_parent "$CONFIG"
+			if restore_service_state "$previous_running"; then
+				write_journal restored
+			else
+				write_journal degraded
+				json_error ROLLBACK "previous service state could not be restored"
+				return 1
+			fi
+			rm -f "$SIDECAR"
+			json_error ROLLBACK "post-start readiness probe failed"
+			return 1
+		fi
+	fi
+	write_journal committed
+	rm -f "$SIDECAR"
+	printf '{"ok":true,"stage":"committed","nonce":"%s","configSha256":"%s"}\n' "$nonce" "$(hash_file "$CONFIG")"
+}
+
+case "${1:-}" in
+	--recover) recover ;;
+	--apply) [ "$#" -eq 4 ] || { json_error INVALID_REQUEST "usage: --apply CANDIDATE EXPECTED_REVISION NONCE"; exit 64; }; apply_candidate "$2" "$3" "$4" ;;
+	*) json_error INVALID_REQUEST "unknown worker command"; exit 64 ;;
+esac

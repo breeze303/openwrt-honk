@@ -4,22 +4,28 @@
 		"read": {
 			"file": [
 				"/etc/honk/config.dae",
+				"/etc/honk/config.dae.default",
+				"/etc/honk/config.dae.last-good",
 				"/etc/config/honk",
-				"/var/log/messages"
+				"/run/honk/**",
+				"/tmp/honk/honk.log",
+				"/usr/share/honk/**"
 			],
 			"ubus": {
+				"service": [ "list" ],
 				"system": [ "board", "info" ],
-				"service": [ "list" ]
+				"network.interface": [ "dump" ],
+				"network.device": [ "status" ]
 			}
 		},
 		"write": {
 			"file": [
 				"/etc/honk/config.dae",
-				"/etc/config/honk"
+				"/etc/honk/config.dae.last-good",
+				"/run/honk/luci-*.json",
+				"/run/honk/luci-*.lock"
 			],
-			"ubus": {
-				"service": [ "list" ]
-			}
+			"ubus": { "service": [ "list" ] }
 		}
 	}
 }

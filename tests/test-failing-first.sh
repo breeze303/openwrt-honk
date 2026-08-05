@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+commit=$(jq -er '.source.commit' "$repo_root/locks/source.lock.json")
 fixture="$repo_root/tests/fixtures/source-lock-floating-dev.json"
 plan="$repo_root/tests/fixtures/plan-malformed-marker.txt"
 out_dir=$(mktemp -d /dev/shm/honk-failing-first.XXXXXX)
@@ -21,6 +22,6 @@ must_fail() {
 	printf 'PASS: %s rejected\n' "$name"
 }
 
-must_fail floating-source "$repo_root/.github/scripts/verify-source-lock.sh" --commit 63e271065246bb68ecadf9ae53abecf748806ad3 --lock "$fixture"
+must_fail floating-source "$repo_root/.github/scripts/verify-source-lock.sh" --commit "$commit" --lock "$fixture"
 exec 9<"$plan"
 must_fail malformed-marker "$repo_root/.github/scripts/provision-lab-secrets.sh" --plan-fd 9 --out-dir "$out_dir" --json

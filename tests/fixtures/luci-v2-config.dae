@@ -1,0 +1,39 @@
+# legacy comments outside managed sections remain available to migration
+global {
+	wan_interface: auto
+	lan_interface: auto
+	log_level: info
+}
+
+node {
+	fixture-node: 'socks5://127.0.0.1:1080'
+}
+
+subscription {
+	fixture-sub {
+		url: 'https://subscriber.invalid/list?token=REDACTED'
+		update_interval: 86400
+		enabled: true
+	}
+}
+
+routing {
+	dip(geoip: private) -> direct(must)
+	dip(geoip: cn) -> direct
+	domain(geosite: cn) -> direct
+	fallback: fixture-node
+}
+
+dns {
+	upstream {
+		aliyun: 'udp://223.5.5.5:53'
+		google: 'tcp+udp://8.8.8.8:53' -> fixture-node
+	}
+}
+
+experimental {
+	cache_file {
+		enabled: true
+		path: '/etc/honk/cache.db'
+	}
+}

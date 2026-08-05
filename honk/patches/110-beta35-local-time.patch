@@ -1,0 +1,27 @@
+diff --git a/crates/honk-core/src/lib.rs b/crates/honk-core/src/lib.rs
+--- a/crates/honk-core/src/lib.rs
++++ b/crates/honk-core/src/lib.rs
+@@ -297,3 +297,14 @@
+ 
+ pub async fn run(cli: Cli) -> anyhow::Result<()> {
++    struct OpenWrtLocalTimer;
++
++    impl tracing_subscriber::fmt::time::FormatTime for OpenWrtLocalTimer {
++        fn format_time(
++            &self,
++            writer: &mut tracing_subscriber::fmt::format::Writer<'_>,
++        ) -> std::fmt::Result {
++            write!(writer, "{}", chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true))
++        }
++    }
++
+     // Load the configuration before initializing logging so `log_level` in
+@@ -328,7 +339,7 @@
+ 
+     use tracing_subscriber::prelude::*;
+     let registry = tracing_subscriber::registry()
+-        .with(tracing_subscriber::fmt::layer().with_filter(env_filter));
++        .with(tracing_subscriber::fmt::layer().with_timer(OpenWrtLocalTimer).with_filter(env_filter));
+     #[cfg(feature = "clash-api")]
+     let registry = registry.with(clash_log_layer);
+     registry.init();

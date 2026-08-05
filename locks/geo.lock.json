@@ -1,26 +1,56 @@
 {
   "assets": [
     {
-      "installPath": "/usr/share/honk/geoip.dat",
-      "package": "v2ray-geoip",
-      "sha256": null
+      "cachePath": ".cache/dl/loyalsoldier-geosite-202607312254.dat",
+      "installPath": "/usr/lib/honk/geosite.dat",
+      "kind": "geosite",
+      "labels": [
+        "gfw",
+        "cn",
+        "private"
+      ],
+      "licenseUrl": "https://github.com/Loyalsoldier/v2ray-rules-dat/blob/master/LICENSE",
+      "provider": "LOYALSOLDIER",
+      "release": "202607312254",
+      "sha256": "1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f",
+      "size": 10540162,
+      "sourceUrl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/202607312254/geosite.dat",
+      "spdx": "GPL-3.0-only",
+      "symlinkPath": "/usr/share/honk/geosite.dat"
     },
     {
-      "installPath": "/usr/share/honk/geosite.dat",
-      "package": "v2ray-geosite",
-      "sha256": null
+      "architectures": [
+        "x86_64",
+        "aarch64"
+      ],
+      "cachePath": ".cache/dl/v2fly-geoip-202607171233.dat",
+      "installPath": "/usr/lib/honk/geoip.dat",
+      "kind": "geoip",
+      "labels": [
+        "cn",
+        "private"
+      ],
+      "licenseUrl": "https://github.com/v2fly/geoip/blob/master/LICENSE",
+      "provider": "V2FLY",
+      "release": "202607171233",
+      "sha256": "b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a",
+      "size": 22765206,
+      "sourceUrl": "https://github.com/v2fly/geoip/releases/download/202607171233/geoip.dat",
+      "spdx": "CC-BY-SA-4.0",
+      "symlinkPath": "/usr/share/honk/geoip.dat"
     }
   ],
   "contract": {
-    "availability": "blocked",
-    "canonicalSourceUrl": "https://github.com/v2fly/geoip",
-    "immutableVersion": "requires target-feed package resolution",
-    "offlineArchivePath": ".cache/dl/geo",
-    "providerPath": "APK index preflight",
-    "sha256": null,
-    "sourceLicenseUrl": "https://github.com/v2fly/geoip/blob/master/LICENSE",
-    "spdxLicense": "CC-BY-SA-4.0"
+    "activeDirectory": "/usr/share/honk",
+    "availability": "available",
+    "lockVersion": "honk.geo.v1",
+    "neverTouch": [
+      "/usr/share/v2ray/geosite.dat",
+      "/usr/share/v2ray/geoip.dat"
+    ],
+    "providerPath": "Honk-owned payloads",
+    "repair": "symlink-only",
+    "runtimeDependency": false
   },
-  "reason": "exact package providers and asset hashes require the locked OpenWrt APK index",
-  "schemaVersion": 1
+  "schemaVersion": 2
 }

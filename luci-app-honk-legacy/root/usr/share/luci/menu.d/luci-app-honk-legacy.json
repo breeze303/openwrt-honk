@@ -1,0 +1,98 @@
+{
+	"admin/services/honk-legacy": {
+		"title": "Honk Legacy",
+		"order": 50,
+		"action": {
+			"type": "template",
+			"path": "honk_legacy/dashboard"
+		},
+		"depends": {
+			"acl": [ "luci-app-honk-legacy" ],
+			"fs": { "/etc/config/honk": "file" }
+		}
+	},
+	"admin/services/honk-legacy/dashboard": {
+		"action": { "type": "template", "path": "honk_legacy/dashboard" }
+	},
+	"admin/services/honk-legacy/config": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "redirect_config" }
+	},
+	"admin/services/honk-legacy/api/dashboard": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_dashboard" }
+	},
+	"admin/services/honk-legacy/api/dashboard_prepare": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_dashboard_prepare" },
+		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
+	},
+	"admin/services/honk-legacy/api/state": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_state" }
+	},
+	"admin/services/honk-legacy/api/validate": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_validate" }
+	},
+	"admin/services/honk-legacy/api/save": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_save" },
+		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
+	},
+	"admin/services/honk-legacy/api/apply": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_apply" },
+		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
+	},
+	"admin/services/honk-legacy/api/service": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_service" },
+		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
+	},
+	"admin/services/honk-legacy/api/logs": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_logs" }
+	},
+	"admin/services/honk-legacy/api/traffic": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_traffic" }
+	},
+	"admin/services/honk-legacy/api/model": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_model" }
+	},
+	"admin/services/honk-legacy/api/runtime_nodes": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_runtime_nodes" }
+	},
+	"admin/services/honk-legacy/api/model_parse": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_model_parse" }
+	},
+	"admin/services/honk-legacy/api/model_preview": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_model_preview" }
+	},
+	"admin/services/honk-legacy/api/model_apply": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_model_apply" },
+		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
+	},
+	"admin/services/honk-legacy/api/node_parse": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_node_parse" }
+	},
+	"admin/services/honk-legacy/api/node_test": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_node_test" },
+		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
+	},
+	"admin/services/honk-legacy/api/network_discovery": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_network_discovery" },
+		"depends": { "acl": [ "luci-app-honk-legacy" ] }
+	},
+	"admin/services/honk-legacy/api/quick_state": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_quick_state" },
+		"depends": { "acl": [ "luci-app-honk-legacy" ] }
+	},
+	"admin/services/honk-legacy/api/quick_preview": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_quick_preview" },
+		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
+	},
+	"admin/services/honk-legacy/api/quick_apply": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_quick_apply" },
+		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
+	},
+	"admin/services/honk-legacy/api/geo_repair": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_geo_repair" },
+		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
+	},
+	"admin/services/honk-legacy/api/transaction_status": {
+		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_transaction_status" },
+		"depends": { "acl": [ "luci-app-honk-legacy" ] }
+	}
+}

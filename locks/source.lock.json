@@ -2,66 +2,38 @@
   "schemaVersion": 1,
   "source": {
     "archive": {
-      "offlinePath": ".cache/dl/honk-63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz",
-      "sha256": "e957a69654219712dadf8f9a6f3a7774fd9dccf57c585fe460122a1d259fe871",
-      "size": 820960,
-      "topLevelDirectory": "honk-63e271065246bb68ecadf9ae53abecf748806ad3",
-      "url": "https://github.com/Glassyiris/honk/archive/63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz"
+      "offlinePath": ".cache/dl/honk-435c12dc8366e871bf4706c7986d03ca613840fc.tar.gz",
+      "sha256": "4b8c6e46bd837fd1ccc785a3fa9c5036c36a925fc2fa832216f0a9dfa79f6b70",
+      "size": 1167028,
+      "topLevelDirectory": "honk-435c12dc8366e871bf4706c7986d03ca613840fc",
+      "url": "https://github.com/Glassyiris/honk/archive/435c12dc8366e871bf4706c7986d03ca613840fc.tar.gz"
     },
     "canonicalUrl": "https://github.com/Glassyiris/honk.git",
-    "commit": "63e271065246bb68ecadf9ae53abecf748806ad3",
+    "commit": "435c12dc8366e871bf4706c7986d03ca613840fc",
     "license": {
-      "sourceLicenseUrl": "https://github.com/Glassyiris/honk/blob/63e271065246bb68ecadf9ae53abecf748806ad3/LICENSE",
+      "sourceLicenseUrl": "https://github.com/Glassyiris/honk/blob/435c12dc8366e871bf4706c7986d03ca613840fc/LICENSE",
       "spdx": "GPL-3.0-only"
     },
     "patchDigests": [
       {
-        "path": "honk/patches/100-openwrt-cli-contracts.patch",
-        "sha256": "7337cf12cdc343d38f15089af95c3dc8ee1a2b0d26de313dfd18adeef9ab38b9"
+        "path": "honk/patches/100-beta35-openwrt-contracts.patch",
+        "sha256": "4fb07d63122b851b016e5d9ef426a7aecb267868562dd7a24f2774e7770e1808"
       },
       {
-        "path": "honk/patches/110-json-bpf-stats.patch",
-        "sha256": "b09fcc52eeec21c416946a77a5006d6347000031539abc868a0852a9943ab495"
-      },
-      {
-        "path": "honk/patches/115-sampled-bpf-rates.patch",
-        "sha256": "b6577896e32219c963e0803b8d1e6aabba16d0706828d14393e6d37ed3f75dfd"
-      },
-      {
-        "path": "honk/patches/116-possible-cpu-count.patch",
-        "sha256": "0ff7334c1b38c4fd38c52cda74febf3c188312e4260defe292d4fcc65679effb"
-      },
-      {
-        "path": "honk/patches/120-portable-bpf-linker.patch",
-        "sha256": "08d47d0b74321d142dfc2b9459ab7ba67e60c6419152261cc262fa1339c7a745"
-      },
-      {
-        "path": "honk/patches/130-clash-memory-stream.patch",
-        "sha256": "bdc1d65b5655fe6b551a0619bee8610fa3446f2991109648520dceec318988a5"
-      },
-      {
-        "path": "honk/patches/140-subscription-node-groups.patch",
-        "sha256": "e1bf340503ad1fac66aa8829184282488ad04b25cdd89a1b8461b9cb0a4b8ae2"
-      },
-      {
-        "path": "honk/patches/150-primary-node-selection.patch",
-        "sha256": "6b3fe056b3c454fc99b617c8019958ec690358527d630496def4a21b347d5643"
-      },
-      {
-        "path": "honk/patches/160-logging.patch",
-        "sha256": "72a34c083e879bf6211f9df232b87875c8c76054211f848cb3504333a09af84e"
+        "path": "honk/patches/110-beta35-local-time.patch",
+        "sha256": "610f9f6ab0fe955e6bab3173610f8963c478d2f49583430f7798f7b953ef156c"
       }
     ],
     "provenance": {
       "archiveSource": "GitHub commit archive",
-      "observedFrom": "protected local Git object database",
-      "providerPath": "github.com/Glassyiris/honk/archive/63e271065246bb68ecadf9ae53abecf748806ad3.tar.gz"
+      "observedFrom": "refs/heads/main",
+      "providerPath": "github.com/Glassyiris/honk/archive/435c12dc8366e871bf4706c7986d03ca613840fc.tar.gz"
     },
     "tagObservation": {
-      "name": "v0.0.1.beta.25",
-      "object": "63e271065246bb68ecadf9ae53abecf748806ad3",
-      "signatureStatus": "unsigned"
+      "name": "v0.0.1.beta.35",
+      "object": "435c12dc8366e871bf4706c7986d03ca613840fc",
+      "signatureStatus": "unverified"
     },
-    "tree": "04e4d0e2a9e422130e228560526eb400e5e606c0"
+    "tree": "b4f31ceae12bb0baeaabbda386ae4bf7c0fc3210"
   }
 }

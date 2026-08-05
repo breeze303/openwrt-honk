@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly source_commit=63e271065246bb68ecadf9ae53abecf748806ad3
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+readonly source_commit=$(jq -er '.source.commit' "$repo_root/locks/source.lock.json")
 source_dir="$repo_root/.cache/work/honk-$source_commit"
 lock="$repo_root/locks/toolchains.lock.json"
 check=false

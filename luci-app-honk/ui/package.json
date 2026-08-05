@@ -1,12 +1,12 @@
 {
-  "name": "luci-app-honk-dashboard",
-  "version": "0.1.0",
+  "name": "luci-app-honk",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
-    "dev": "vite"
+    "dev": "vite --host 0.0.0.0"
   },
   "dependencies": {
     "@lucide/vue": "^1.28.0",

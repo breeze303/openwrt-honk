@@ -13,6 +13,17 @@ on:
       - honk/patches/**
       - locks/source.lock.json
       - locks/toolchains.lock.json
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/scripts/build-honk-binaries.sh
+      - .github/workflows/build-honk-binaries.yml
+      - honk/Makefile
+      - honk/source.mk
+      - honk/patches/**
+      - locks/source.lock.json
+      - locks/toolchains.lock.json
 
 permissions:
   contents: read
@@ -148,6 +159,7 @@ jobs:
 
   release:
     name: Publish binary release
+    if: github.event_name != 'pull_request'
     needs:
       - prepare
       - build
