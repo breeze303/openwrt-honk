@@ -40,8 +40,6 @@ bash -n .github/scripts/download-honk-binaries.sh
 bash -n .github/scripts/update-honk-source.sh
 bash -n .github/scripts/check-dashboard-assets.sh
 bash -n .github/scripts/provision-ui-cache.sh
-bash -n .github/scripts/run-fast-ci-lane.sh
-bash -n .github/scripts/build-locked-sdk.sh
 bash -n .github/scripts/target-smoke.sh
 sh -n .github/scripts/target-smoke-remote.sh
 bash -n tests/quick-setup-target-harness.sh

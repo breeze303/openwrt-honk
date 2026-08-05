@@ -8,7 +8,7 @@
     "canonicalSourceUrl": "https://downloads.immortalwrt.org",
     "immutableVersion": "ImmortalWrt SNAPSHOT r0-6efdfa7",
     "offlineArchivePath": ".cache/dl/openwrt",
-    "providerPath": "target-preflight",
+    "providerPath": "observed VM facts",
     "sha256": null,
     "sourceLicenseUrl": "https://github.com/openwrt/openwrt/blob/master/LICENSES/GPL-2.0-only.txt",
     "spdxLicense": "GPL-2.0-only"
