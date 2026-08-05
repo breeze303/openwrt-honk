@@ -49,13 +49,90 @@ tests/                 Focused packaging and integration checks
 
 ## Requirements
 
-The fast package path supports x86_64 and aarch64 targets. It needs an OpenWrt SDK plus feeds that provide kmod-sched-core, kmod-sched-bpf, kmod-veth, and the usual base runtime libraries. GeoSite and GeoIP are provisioned from the exact offline inputs in `locks/geo.lock.json`; the Honk package has no runtime dependency on a target package manager's `v2ray-*` Geo data. Rust is not installed in the SDK container on this path.
+The package supports only x86_64 and aarch64 targets. The build dependencies below are host-side tools; the runtime dependencies are installed into the OpenWrt image.
 
-The separate binary build runs on a standard Linux host with Rust stable, Rust nightly with rust-src, bpf-linker, LLVM/libclang, CMake, and Zig 0.14.1. It produces static musl binaries with the BTF-enabled eBPF object embedded. When no binaries are staged under `honk/files/bin/`, the package recipe retains its source-build fallback and requires the original Rust OpenWrt toolchain.
+### Host build dependencies
+
+The commands below target Ubuntu/Debian. Other Linux distributions need equivalent packages:
+
+~~~sh
+sudo apt-get update
+sudo apt-get install -y \
+  git curl jq patch tar gzip zstd binutils \
+  clang llvm libbpf-dev libclang-dev pkg-config cmake
+~~~
+
+The standalone Honk binary builder additionally requires Rustup, Rust stable `1.97.1`, Rust nightly `nightly-2026-07-27` with `rust-src` and `llvm-tools`, Zig `0.14.1`, and `bpf-linker` `0.10.4`:
+
+~~~sh
+rustup toolchain install 1.97.1 --profile minimal \
+  --target x86_64-unknown-linux-musl
+rustup toolchain install nightly-2026-07-27 --profile minimal \
+  --component rust-src --component llvm-tools
+~~~
+
+Install the aarch64 Rust target instead when building aarch64. The CI workflow downloads and verifies the eBPF linker as follows; use the same SHA-256 when installing it locally:
+
+~~~sh
+mkdir -p "$HOME/.cargo/bin"
+curl --fail --location --retry 5 --retry-all-errors \
+  -o /tmp/bpf-linker.tar.zst \
+  https://github.com/aya-rs/bpf-linker/releases/download/v0.10.4/bpf-linker-x86_64-unknown-linux-musl.tar.zst
+printf '%s  %s\n' \
+  4dda77daab6c5f120a468e6d3ede2498f5bd47ece712172cfb7290176d93d015 \
+  /tmp/bpf-linker.tar.zst | sha256sum -c -
+tar --zstd -xf /tmp/bpf-linker.tar.zst -C "$HOME/.cargo/bin"
+~~~
+
+Building either LuCI dashboard requires Node.js 22 and npm. The package path itself does not install Rust when prebuilt Honk binaries are used.
+
+### OpenWrt runtime dependencies
+
+The `honk` package declares `ca-bundle`, `ip-full`, `tc-full`, `nsenter`, `libstdcpp`, `jq`, `kmod-sched-core`, `kmod-sched-bpf`, and `kmod-veth`. The current LuCI package adds `luci-base`, `luci-compat`, and `curl`; the legacy package uses `luci-base` and `luci-compat`. The target kernel must provide `CONFIG_BPF`, `CONFIG_BPF_SYSCALL`, `CONFIG_BPF_JIT`, `CONFIG_CGROUP_BPF`, `CONFIG_NET_CLS_BPF`, `CONFIG_NET_SCH_INGRESS`, `CONFIG_NET_CLS_ACT`, `CONFIG_NET_NS`, `CONFIG_VETH`, and `CONFIG_DEBUG_INFO_BTF`.
+
+GeoSite and GeoIP are provisioned from the exact inputs in `locks/geo.lock.json`. Honk owns `/usr/lib/honk` and `/usr/share/honk`; it has no runtime dependency on a target package manager's `v2ray-*` Geo data. To prepare the locked assets in a checkout:
+
+~~~sh
+mkdir -p .cache/dl
+curl --fail --location -o .cache/dl/loyalsoldier-geosite-202607312254.dat \
+  https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/202607312254/geosite.dat
+curl --fail --location -o .cache/dl/v2fly-geoip-202607171233.dat \
+  https://github.com/v2fly/geoip/releases/download/202607171233/geoip.dat
+printf '%s  %s\n' \
+  1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f \
+  .cache/dl/loyalsoldier-geosite-202607312254.dat | sha256sum -c -
+printf '%s  %s\n' \
+  b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a \
+  .cache/dl/v2fly-geoip-202607171233.dat | sha256sum -c -
+~~~
+
+When no binaries are staged under `honk/files/bin/`, the package recipe enters its source-build fallback. That path needs the OpenWrt Rust host package and the SDK's configured Rust/nightly toolchain; it is separate from the standalone Linux builder described below.
 
 ## Build
 
-Download and verify the matching static binary release before running the fast package build. GitHub Actions performs this step automatically; locally, run one of:
+### Build Honk binaries from source
+
+The standalone builder downloads the locked upstream archive, verifies its SHA-256, applies the local OpenWrt patch series, builds the eBPF object, and produces static musl binaries. Select one supported architecture:
+
+~~~sh
+export PACKAGE_ARCH=x86_64
+export RUST_TARGET=x86_64-unknown-linux-musl
+export RUST_STABLE_TOOLCHAIN=1.97.1
+export BPF_RUST_TOOLCHAIN=nightly-2026-07-27
+export ARTIFACTS_DIR="$PWD/.binary-output"
+bash .github/scripts/build-honk-binaries.sh
+~~~
+
+For aarch64 use `PACKAGE_ARCH=aarch64` and `RUST_TARGET=aarch64-unknown-linux-musl`. Before compiling the OpenWrt package, stage the two executables so the package uses the prebuilt path:
+
+~~~sh
+install -d honk/files/bin
+install -m 0755 .binary-output/honk-core .binary-output/honk-tool honk/files/bin/
+~~~
+
+### Build OpenWrt packages
+
+When a matching binary Release already exists, download and verify it before running the fast package build. GitHub Actions performs this step automatically; locally, run one of:
 
 ~~~sh
 PACKAGE_ARCH=x86_64 .github/scripts/download-honk-binaries.sh
@@ -73,15 +150,24 @@ make package/luci-app-honk/compile V=s
 make package/luci-app-honk-legacy/compile V=s
 ~~~
 
-For the dashboard source alone:
+The SDK path only packages staged Honk binaries and does not compile Rust or eBPF. If both `honk-core` and `honk-tool` are absent from `honk/files/bin/`, OpenWrt falls back to its Rust package toolchain instead.
+
+### Build the LuCI dashboards alone
 
 ~~~sh
-cd luci-app-honk/ui
-npm ci
-npm run build
+for app in luci-app-honk/ui luci-app-honk-legacy/ui; do
+  (cd "$app" && npm ci && npm run typecheck && npm run build)
+done
 ~~~
 
-The generated LuCI assets are committed below luci-app-honk/root/www/luci-static/resources/honk/app/.
+The generated assets are committed below `luci-app-honk/root/www/luci-static/resources/honk/app/` and `luci-app-honk-legacy/root/www/luci-static/resources/honk-legacy/app/`.
+
+Run the repository checks before publishing a package:
+
+~~~sh
+bash tests/run-tests.sh
+git diff --check
+~~~
 
 ### GitHub Actions
 
