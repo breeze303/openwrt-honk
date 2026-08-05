@@ -10,7 +10,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install test tools
-        run: sudo apt-get update && sudo apt-get install -y jq lua5.4
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          jq lua5.4 ripgrep clang llvm libclang-dev pkg-config cmake
       - name: Restore locked source archive
         shell: bash
         run: |
@@ -40,23 +42,27 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: honk-contracts-cargo-${{ runner.os }}-${{ hashFiles('locks/source.lock.json', 'honk/patches/*.patch') }}
+          save-always: true
       - name: Provision locked Cargo cache
         shell: bash
         env:
           RUSTUP_TOOLCHAIN: 1.97.1
         run: |
           set -euo pipefail
-          tmp=$(mktemp -d)
-          trap 'rm -rf "$tmp"' EXIT INT TERM
           archive_path=$(jq -er '.source.archive.offlinePath' locks/source.lock.json)
           source_top=$(jq -er '.source.archive.topLevelDirectory' locks/source.lock.json)
-          tar -xzf "$archive_path" -C "$tmp"
-          source_dir="$tmp/$source_top"
+          work_root="$PWD/.cache/work"
+          mkdir -p "$work_root"
+          tar -xzf "$archive_path" -C "$work_root"
+          source_dir="$work_root/$source_top"
+          test -d "$source_dir"
           while IFS= read -r patch_file; do
             patch -d "$source_dir" -p1 <"$patch_file" >/dev/null
           done < <(jq -er -r '.source.patchDigests[].path' locks/source.lock.json)
           rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
           cargo fetch --locked --manifest-path "$source_dir/Cargo.toml"
+          cargo build --locked --manifest-path "$source_dir/Cargo.toml" -p honk-tool
+          test -x "$source_dir/target/debug/honk-tool"
       - run: bash tests/run-tests.sh
 
   dashboard:

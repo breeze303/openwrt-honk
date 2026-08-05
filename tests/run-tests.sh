@@ -69,6 +69,8 @@ grep -F 'bpf-linker' .github/scripts/build-packages-in-sdk.sh >/dev/null
 grep -F 'packages_lang_rust.git' .github/scripts/build-packages-in-sdk.sh >/dev/null
 grep -F -- '--prefer-offline' .github/scripts/provision-ui-cache.sh >/dev/null
 grep -F 'cargo fetch --locked' .github/workflows/ci.yml >/dev/null
+grep -F 'cargo build --locked --manifest-path "$source_dir/Cargo.toml" -p honk-tool' .github/workflows/ci.yml >/dev/null
+grep -F 'ripgrep clang llvm libclang-dev pkg-config cmake' .github/workflows/ci.yml >/dev/null
 grep -F 'locks/geo.lock.json' .github/workflows/ci.yml >/dev/null
 grep -F 'luci-app-honk-legacy/ui/package-lock.json --cache .cache/npm' .github/workflows/ci.yml >/dev/null
 test ! -e .github/workflows/build-honk-binaries.yml
