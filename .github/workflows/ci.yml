@@ -8,7 +8,7 @@ jobs:
   contracts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install test tools
         run: sudo apt-get update && sudo apt-get install -y jq lua5.4
       - name: Restore locked source archive
@@ -22,21 +22,47 @@ jobs:
           curl --proto '=https' --tlsv1.2 --fail --location --retry 5 --retry-all-errors \
             --output "$archive_path" "$archive_url"
           printf '%s  %s\n' "$archive_sha256" "$archive_path" | sha256sum -c -
+      - name: Cache Cargo downloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: honk-contracts-cargo-${{ runner.os }}-${{ hashFiles('locks/source.lock.json', 'honk/patches/*.patch') }}
+      - name: Provision locked Cargo cache
+        shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: 1.97.1
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT INT TERM
+          archive_path=$(jq -er '.source.archive.offlinePath' locks/source.lock.json)
+          source_top=$(jq -er '.source.archive.topLevelDirectory' locks/source.lock.json)
+          tar -xzf "$archive_path" -C "$tmp"
+          source_dir="$tmp/$source_top"
+          while IFS= read -r patch_file; do
+            patch -d "$source_dir" -p1 <"$patch_file" >/dev/null
+          done < <(jq -er -r '.source.patchDigests[].path' locks/source.lock.json)
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          cargo fetch --locked --manifest-path "$source_dir/Cargo.toml"
       - run: bash tests/run-tests.sh
 
   dashboard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: |
             luci-app-honk/ui/package-lock.json
             luci-app-honk-legacy/ui/package-lock.json
-      - name: Provision locked UI cache
-        run: .github/scripts/provision-ui-cache.sh --lock luci-app-honk/ui/package-lock.json --cache .cache/npm --evidence .cache/evidence/dashboard-cache.json
+      - name: Provision locked UI caches
+        run: |
+          .github/scripts/provision-ui-cache.sh --lock luci-app-honk/ui/package-lock.json --cache .cache/npm --evidence .cache/evidence/dashboard-cache.json
+          .github/scripts/provision-ui-cache.sh --lock luci-app-honk-legacy/ui/package-lock.json --cache .cache/npm --evidence .cache/evidence/legacy-dashboard-cache.json
       - name: Build dashboard offline
         run: env HOME="$RUNNER_TEMP/honk-ui-home" npm_config_cache="$PWD/.cache/npm" npm ci --offline --ignore-scripts --prefix luci-app-honk/ui && env HOME="$RUNNER_TEMP/honk-ui-home" npm_config_cache="$PWD/.cache/npm" npm run build --prefix luci-app-honk/ui
       - name: Build legacy dashboard offline

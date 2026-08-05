@@ -67,6 +67,9 @@ grep -F 'package/honk/compile' .github/scripts/build-packages-in-sdk.sh >/dev/nu
 grep -F 'rustup toolchain install' .github/scripts/build-packages-in-sdk.sh >/dev/null
 grep -F 'bpf-linker' .github/scripts/build-packages-in-sdk.sh >/dev/null
 grep -F 'packages_lang_rust.git' .github/scripts/build-packages-in-sdk.sh >/dev/null
+grep -F -- '--prefer-offline' .github/scripts/provision-ui-cache.sh >/dev/null
+grep -F 'cargo fetch --locked' .github/workflows/ci.yml >/dev/null
+grep -F 'luci-app-honk-legacy/ui/package-lock.json --cache .cache/npm' .github/workflows/ci.yml >/dev/null
 test ! -e .github/workflows/build-honk-binaries.yml
 test ! -e .github/scripts/build-honk-binaries.sh
 test ! -e .github/scripts/download-honk-binaries.sh

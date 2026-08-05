@@ -16,20 +16,32 @@ done
 mkdir -p "$(dirname "$evidence")"
 lock_count=$(jq -er '[.packages | to_entries[] | select(.key != "") | select(.value.resolved and .value.integrity)] | length' "$lock")
 [ "$lock_count" -gt 0 ] || { echo "package lock has no integrity-pinned packages" >&2; exit 1; }
+project_dir=$(dirname "$lock")
+[ -f "$project_dir/package.json" ] || { echo "package.json is missing next to lock: $lock" >&2; exit 1; }
 
 source_cache="${NPM_SOURCE_CACHE:-$HOME/.npm}"
 cache_mode="existing"
-if [ ! -d "$cache" ]; then
+if [ ! -e "$cache" ]; then
 	if [ -d "$source_cache" ]; then
 		mkdir -p "$(dirname "$cache")"
 		ln -s "$source_cache" "$cache"
-		cache_mode="provisioned-readonly-source"
+		cache_mode="shared-source-cache"
 	else
 		mkdir -p "$cache"
-		cache_mode="empty"
+		cache_mode="created"
 	fi
 fi
-npm cache verify --cache "$cache" >/dev/null 2>&1 || true
+
+# This is the workflow's network-enabled provisioning phase. npm ci validates
+# every tarball against package-lock.json while filling the cache used later by
+# the strictly offline build step.
+env npm_config_cache="$cache" npm ci \
+	--ignore-scripts \
+	--prefer-offline \
+	--no-audit \
+	--no-fund \
+	--prefix "$project_dir"
+npm cache verify --cache "$cache" >/dev/null
 
 jq -n --arg lock "${lock#$repo_root/}" --arg cache "${cache#$repo_root/}" --arg source "$cache_mode" --argjson packages "$lock_count" \
 	'{schemaVersion:"honk.ui-cache.v1",lock:$lock,cache:$cache,cacheMode:$source,packages:$packages,integrityPinned:true,networkProvisionPhase:true,ok:true}' \
