@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
 PKG_VERSION:=0.0.1_git
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_LICENSE:=GPL-3.0-only
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=Honk OpenWrt feed
@@ -15,16 +15,12 @@ PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_SOURCE_SUBDIR)
 PKG_BUILD_PARALLEL:=1
 PKG_USE_MIPS16:=0
 
-HONK_PREBUILT_DIR?=$(CURDIR)/files/bin
-HONK_USE_PREBUILT:=$(if $(and $(wildcard $(HONK_PREBUILT_DIR)/honk-core),$(wildcard $(HONK_PREBUILT_DIR)/honk-tool)),1)
 GEO_CACHE_DIR?=$(CURDIR)/../.cache/dl
 GEO_LOCK?=$(CURDIR)/../locks/geo.lock.json
 GEO_SITE_CACHE:=$(GEO_CACHE_DIR)/loyalsoldier-geosite-202607312254.dat
 GEO_IP_CACHE:=$(GEO_CACHE_DIR)/v2fly-geoip-202607171233.dat
 
-ifneq ($(HONK_USE_PREBUILT),1)
 PKG_BUILD_DEPENDS:=rust/host
-endif
 
 include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/rust/rust-package.mk
@@ -50,11 +46,11 @@ define Package/honk/conffiles
 endef
 
 RUST_TARGET:=$(RUSTC_TARGET_ARCH)
-BPF_RUST_TOOLCHAIN?=nightly
+BPF_RUST_TOOLCHAIN?=nightly-2026-07-27
 BPF_CARGO?=rustup run $(BPF_RUST_TOOLCHAIN) cargo
 BPF_RUSTC?=$(shell rustup which --toolchain $(BPF_RUST_TOOLCHAIN) rustc 2>/dev/null)
-HONK_CORE_BINARY:=$(if $(filter 1,$(HONK_USE_PREBUILT)),$(HONK_PREBUILT_DIR)/honk-core,$(PKG_BUILD_DIR)/target/$(RUST_TARGET)/release/honk-core)
-HONK_TOOL_BINARY:=$(if $(filter 1,$(HONK_USE_PREBUILT)),$(HONK_PREBUILT_DIR)/honk-tool,$(PKG_BUILD_DIR)/target/$(RUST_TARGET)/release/honk-tool)
+HONK_CORE_BINARY:=$(PKG_BUILD_DIR)/target/$(RUST_TARGET)/release/honk-core
+HONK_TOOL_BINARY:=$(PKG_BUILD_DIR)/target/$(RUST_TARGET)/release/honk-tool
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
@@ -65,12 +61,6 @@ define Build/Prepare
 	@test -f $(GEO_IP_CACHE) && sha256sum $(GEO_IP_CACHE) | cut -d ' ' -f 1 | grep -qx b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a
 endef
 
-ifeq ($(HONK_USE_PREBUILT),1)
-define Build/Compile
-	@test -x $(HONK_CORE_BINARY)
-	@test -x $(HONK_TOOL_BINARY)
-endef
-else
 define Build/Compile
 	$(if $(filter x86_64 aarch64,$(ARCH)),,$(error honk supports only x86_64 and aarch64))
 	+cd $(PKG_BUILD_DIR)/crates/honk-ebpf && \
@@ -88,7 +78,6 @@ define Build/Compile
 		cargo build --locked --release --target $(RUST_TARGET) \
 			-p honk-core -p honk-tool --features honk-core/ebpf
 endef
-endif
 
 define Package/honk/install
 	$(INSTALL_DIR) $(1)/usr/bin $(1)/usr/libexec/honk $(1)/usr/lib/honk $(1)/usr/share/honk $(1)/etc/init.d $(1)/etc/config $(1)/etc/honk/config.d

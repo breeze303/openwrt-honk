@@ -2,18 +2,24 @@ name: Build packages
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows:
-      - Build Honk binaries
-    types:
-      - completed
-    branches:
-      - master
   push:
     branches:
-      - master
+      - main
     paths:
-      - honk/files/**
+      - .github/scripts/build-packages-in-sdk.sh
+      - .github/workflows/build-packages.yml
+      - honk/**
+      - locks/**
+      - luci-app-honk/**
+      - luci-app-honk-legacy/**
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/scripts/build-packages-in-sdk.sh
+      - .github/workflows/build-packages.yml
+      - honk/**
+      - locks/**
       - luci-app-honk/**
       - luci-app-honk-legacy/**
 
@@ -21,16 +27,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: packages-${{ github.event.workflow_run.head_sha || github.ref }}
+  group: packages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   prepare:
     name: Prepare version
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     outputs:
-      binary_release_tag: ${{ steps.meta.outputs.binary_release_tag }}
       checkout_ref: ${{ steps.meta.outputs.checkout_ref }}
       release_name: ${{ steps.meta.outputs.release_name }}
       release_tag: ${{ steps.meta.outputs.release_tag }}
@@ -38,14 +42,12 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Generate version metadata
         id: meta
         shell: bash
         env:
-          CHECKOUT_REF: ${{ github.event.workflow_run.head_sha || github.sha }}
+          CHECKOUT_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
           pkg_version=$(sed -n 's/^PKG_VERSION:=//p' honk/Makefile | head -n 1)
@@ -54,7 +56,6 @@ jobs:
           short_revision=${source_revision:0:7}
           version="${pkg_version}-r${pkg_release}_${short_revision}"
           {
-            echo "binary_release_tag=honk_binaries_${version}"
             echo "checkout_ref=$CHECKOUT_REF"
             echo "release_name=honk_${version}"
             echo "release_tag=honk_${version}"
@@ -70,19 +71,15 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            binary_arch: x86_64
             sdk: openwrt-24.10
             package_ext: ipk
           - arch: aarch64_generic
-            binary_arch: aarch64
             sdk: openwrt-24.10
             package_ext: ipk
           - arch: x86_64
-            binary_arch: x86_64
             sdk: openwrt-25.12
             package_ext: apk
           - arch: aarch64_generic
-            binary_arch: aarch64
             sdk: openwrt-25.12
             package_ext: apk
 
@@ -92,29 +89,56 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
 
-      - name: Download prebuilt Honk binaries
+      - name: Prepare locked Geo assets
         shell: bash
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          HONK_BINARY_RELEASE_TAG: ${{ needs.prepare.outputs.binary_release_tag }}
-          HONK_BINARY_VERSION: ${{ needs.prepare.outputs.version }}
-          PACKAGE_ARCH: ${{ matrix.binary_arch }}
-        run: bash .github/scripts/download-honk-binaries.sh
+        run: |
+          set -euo pipefail
+          mkdir -p .cache/dl
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 5 --retry-all-errors \
+            --output .cache/dl/loyalsoldier-geosite-202607312254.dat \
+            https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/202607312254/geosite.dat
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 5 --retry-all-errors \
+            --output .cache/dl/v2fly-geoip-202607171233.dat \
+            https://github.com/v2fly/geoip/releases/download/202607171233/geoip.dat
+          printf '%s  %s\n' \
+            1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f \
+            .cache/dl/loyalsoldier-geosite-202607312254.dat | sha256sum -c -
+          printf '%s  %s\n' \
+            b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a \
+            .cache/dl/v2fly-geoip-202607171233.dat | sha256sum -c -
 
       - name: Build packages in OpenWrt SDK
         shell: bash
         env:
           SDK_IMAGE: ghcr.io/openwrt/sdk:${{ matrix.arch }}-${{ matrix.sdk }}
+          BPF_LINKER_SHA256: 4dda77daab6c5f120a468e6d3ede2498f5bd47ece712172cfb7290176d93d015
+          BPF_LINKER_VERSION: 0.10.4
+          BPF_RUST_TOOLCHAIN: nightly-2026-07-27
+          RUST_FEED_COMMIT: 2006dff59caa09bc3bc22ffdc84df2aa1c8d0c8a
         run: |
           set -euo pipefail
           mkdir -p .build-output
-          sudo chown 1000:1000 .build-output
+          sudo chown 1000:1000 .build-output .cache/dl
           docker run --rm \
-            --user buildbot \
+            --user root \
+            --env BPF_LINKER_SHA256 \
+            --env BPF_LINKER_VERSION \
+            --env BPF_RUST_TOOLCHAIN \
+            --env RUST_FEED_COMMIT \
             --volume "$GITHUB_WORKSPACE:/feed:ro" \
             --volume "$GITHUB_WORKSPACE/.build-output:/artifacts" \
             "$SDK_IMAGE" \
-            bash /feed/.github/scripts/build-packages-in-sdk.sh
+            bash -lc '
+              set -euo pipefail
+              apt-get update
+              apt-get install -y --no-install-recommends ca-certificates curl git zstd libclang-dev clang llvm libbpf-dev pkg-config cmake
+              exec runuser --user buildbot -- \
+                env BPF_LINKER_SHA256="$BPF_LINKER_SHA256" \
+                    BPF_LINKER_VERSION="$BPF_LINKER_VERSION" \
+                    BPF_RUST_TOOLCHAIN="$BPF_RUST_TOOLCHAIN" \
+                    RUST_FEED_COMMIT="$RUST_FEED_COMMIT" \
+                    bash /feed/.github/scripts/build-packages-in-sdk.sh
+            '
           sudo chown -R "$(id -u):$(id -g)" .build-output
 
       - name: Prepare artifacts
@@ -153,6 +177,7 @@ jobs:
 
   release:
     name: Publish release
+    if: github.event_name != 'pull_request'
     needs:
       - prepare
       - build

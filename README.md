@@ -62,16 +62,14 @@ sudo apt-get install -y \
   clang llvm libbpf-dev libclang-dev pkg-config cmake
 ~~~
 
-The standalone Honk binary builder additionally requires Rustup, Rust stable `1.97.1`, Rust nightly `nightly-2026-07-27` with `rust-src` and `llvm-tools`, Zig `0.14.1`, and `bpf-linker` `0.10.4`:
+The source build runs inside the OpenWrt SDK. The SDK helper installs Rustup, the pinned BPF nightly toolchain, the pinned Rust feed revision, and `bpf-linker` `0.10.4`:
 
 ~~~sh
-rustup toolchain install 1.97.1 --profile minimal \
-  --target x86_64-unknown-linux-musl
 rustup toolchain install nightly-2026-07-27 --profile minimal \
-  --component rust-src --component llvm-tools
+  --component rust-src
 ~~~
 
-Install the aarch64 Rust target instead when building aarch64. The CI workflow downloads and verifies the eBPF linker as follows; use the same SHA-256 when installing it locally:
+The SDK helper downloads and verifies the host eBPF linker with this SHA-256:
 
 ~~~sh
 mkdir -p "$HOME/.cargo/bin"
@@ -84,7 +82,7 @@ printf '%s  %s\n' \
 tar --zstd -xf /tmp/bpf-linker.tar.zst -C "$HOME/.cargo/bin"
 ~~~
 
-Building either LuCI dashboard requires Node.js 22 and npm. The package path itself does not install Rust when prebuilt Honk binaries are used.
+Building either LuCI dashboard requires Node.js 22 and npm. Rust and the eBPF linker are installed inside the SDK build container as part of the source build.
 
 ### OpenWrt runtime dependencies
 
@@ -106,51 +104,23 @@ printf '%s  %s\n' \
   .cache/dl/v2fly-geoip-202607171233.dat | sha256sum -c -
 ~~~
 
-When no binaries are staged under `honk/files/bin/`, the package recipe enters its source-build fallback. That path needs the OpenWrt Rust host package and the SDK's configured Rust/nightly toolchain; it is separate from the standalone Linux builder described below.
-
 ## Build
-
-### Build Honk binaries from source
-
-The standalone builder downloads the locked upstream archive, verifies its SHA-256, applies the local OpenWrt patch series, builds the eBPF object, and produces static musl binaries. Select one supported architecture:
-
-~~~sh
-export PACKAGE_ARCH=x86_64
-export RUST_TARGET=x86_64-unknown-linux-musl
-export RUST_STABLE_TOOLCHAIN=1.97.1
-export BPF_RUST_TOOLCHAIN=nightly-2026-07-27
-export ARTIFACTS_DIR="$PWD/.binary-output"
-bash .github/scripts/build-honk-binaries.sh
-~~~
-
-For aarch64 use `PACKAGE_ARCH=aarch64` and `RUST_TARGET=aarch64-unknown-linux-musl`. Before compiling the OpenWrt package, stage the two executables so the package uses the prebuilt path:
-
-~~~sh
-install -d honk/files/bin
-install -m 0755 .binary-output/honk-core .binary-output/honk-tool honk/files/bin/
-~~~
 
 ### Build OpenWrt packages
 
-When a matching binary Release already exists, download and verify it before running the fast package build. GitHub Actions performs this step automatically; locally, run one of:
-
-~~~sh
-PACKAGE_ARCH=x86_64 .github/scripts/download-honk-binaries.sh
-PACKAGE_ARCH=aarch64 .github/scripts/download-honk-binaries.sh
-~~~
-
-Then install this checkout as an OpenWrt feed or place the package directories in the buildroot, refresh feeds, and select both packages:
+Install this checkout as an OpenWrt feed or place the package directories in the buildroot, refresh feeds, and select the packages:
 
 ~~~sh
 ./scripts/feeds update honk
 ./scripts/feeds install -a -p honk
 make menuconfig
+make package/honk/download V=s
 make package/honk/compile V=s
 make package/luci-app-honk/compile V=s
 make package/luci-app-honk-legacy/compile V=s
 ~~~
 
-The SDK path only packages staged Honk binaries and does not compile Rust or eBPF. If both `honk-core` and `honk-tool` are absent from `honk/files/bin/`, OpenWrt falls back to its Rust package toolchain instead.
+`package/honk/compile` always downloads the locked upstream Honk archive from GitHub, verifies the package hash, applies `honk/patches/`, builds the eBPF object with the pinned nightly toolchain, and then builds `honk-core` and `honk-tool` for the selected OpenWrt target. There is no `honk/files/bin` staging directory and no binary Release dependency.
 
 ### Build the LuCI dashboards alone
 
@@ -173,14 +143,12 @@ git diff --check
 
 `Update Honk upstream` checks upstream `main` every day. When a new revision is available, it downloads the commit archive, calculates its SHA-256 and Git tree, validates every local patch, and creates or updates the `automation/honk-upstream` PR. It can also be run manually from the Actions page. Patch conflicts stop the refresh and retain the current buildable revision.
 
-The `Build Honk binaries` workflow compiles Honk directly on standard Linux runners. Its two parallel jobs use Zig to cross-compile static musl binaries for x86_64 and aarch64; no OpenWrt SDK is involved. Each architecture archive contains `honk-core`, `honk-tool`, a manifest, and checksums.
-
-After a binary release succeeds, `Build packages` downloads and verifies the matching archive, then starts the OpenWrt SDK matrix. LuCI-only changes reuse the existing binary release. The matrix builds:
+`Build packages` directly builds Honk from its locked upstream source in each OpenWrt SDK matrix job. The helper installs the pinned Rust host feed, nightly `rust-src`, and verified `bpf-linker` before invoking `package/honk/download` and `package/honk/compile`. The matrix builds:
 
 - IPK packages for OpenWrt 24.10 on x86_64 and aarch64_generic.
 - APK packages for OpenWrt 25.12 on x86_64 and aarch64_generic.
 
-Each matrix job only packages the staged binaries, service files, and LuCI assets; it does not compile Rust or eBPF. It uploads `honk`, `luci-app-honk`, and `luci-app-honk-legacy` as workflow artifacts. After all four builds pass, the workflow publishes the same files in a versioned GitHub Release. The architecture and SDK are appended to release filenames so LuCI's architecture-independent packages are still easy to identify.
+Each matrix job uploads the newly compiled `honk`, `luci-app-honk`, and `luci-app-honk-legacy` packages as workflow artifacts. After all four builds pass, the workflow publishes the packages in a versioned GitHub Release. The architecture and SDK are appended to release filenames so LuCI's architecture-independent packages are still easy to identify.
 
 ## Install
 

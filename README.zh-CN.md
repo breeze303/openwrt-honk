@@ -62,16 +62,14 @@ sudo apt-get install -y \
   clang llvm libbpf-dev libclang-dev pkg-config cmake
 ~~~
 
-独立 Honk 二进制构建还需要 Rustup、Rust stable `1.97.1`、带 `rust-src` 和 `llvm-tools` 的 `nightly-2026-07-27`、Zig `0.14.1` 以及 `bpf-linker` `0.10.4`：
+源码构建在 OpenWrt SDK 容器内完成。SDK 辅助脚本会安装 Rustup、锁定的 BPF nightly 工具链、锁定的 Rust feed 提交，以及 `bpf-linker` `0.10.4`：
 
 ~~~sh
-rustup toolchain install 1.97.1 --profile minimal \
-  --target x86_64-unknown-linux-musl
 rustup toolchain install nightly-2026-07-27 --profile minimal \
-  --component rust-src --component llvm-tools
+  --component rust-src
 ~~~
 
-构建 aarch64 时将 Rust target 换成对应的 aarch64 target。CI 会按下面的方式下载并校验 eBPF linker，本地安装也应使用相同 SHA-256：
+SDK 辅助脚本会使用下面的 SHA-256 下载并校验 eBPF linker：
 
 ~~~sh
 mkdir -p "$HOME/.cargo/bin"
@@ -84,7 +82,7 @@ printf '%s  %s\n' \
 tar --zstd -xf /tmp/bpf-linker.tar.zst -C "$HOME/.cargo/bin"
 ~~~
 
-构建任一 LuCI 页面需要 Node.js 22 和 npm。使用预编译 Honk 二进制的 SDK 打包路径不需要在 SDK 容器中安装 Rust。
+构建任一 LuCI 页面需要 Node.js 22 和 npm。Rust 和 eBPF linker 会在 SDK 构建容器内安装并用于源码构建。
 
 ### OpenWrt 运行依赖
 
@@ -106,51 +104,23 @@ printf '%s  %s\n' \
   .cache/dl/v2fly-geoip-202607171233.dat | sha256sum -c -
 ~~~
 
-`honk/files/bin/` 中没有两个成品时，软件包配方会进入源码构建 fallback。该路径需要 OpenWrt Rust host 软件包和 SDK 自己配置的 Rust/nightly 工具链，与下面的独立 Linux 主机构建路径不同。
-
 ## 构建
-
-### 从源码构建 Honk 二进制
-
-独立构建脚本会下载锁定的上游归档、校验 SHA-256、应用 OpenWrt 补丁、构建 eBPF 对象，并生成静态 musl 二进制。选择一个支持的架构：
-
-~~~sh
-export PACKAGE_ARCH=x86_64
-export RUST_TARGET=x86_64-unknown-linux-musl
-export RUST_STABLE_TOOLCHAIN=1.97.1
-export BPF_RUST_TOOLCHAIN=nightly-2026-07-27
-export ARTIFACTS_DIR="$PWD/.binary-output"
-bash .github/scripts/build-honk-binaries.sh
-~~~
-
-aarch64 使用 `PACKAGE_ARCH=aarch64` 和 `RUST_TARGET=aarch64-unknown-linux-musl`。编译 OpenWrt 软件包前将两个成品放入预编译目录：
-
-~~~sh
-install -d honk/files/bin
-install -m 0755 .binary-output/honk-core .binary-output/honk-tool honk/files/bin/
-~~~
 
 ### 构建 OpenWrt 软件包
 
-如果已有匹配的二进制 Release，先下载并校验对应架构的成品。GitHub Actions 会自动执行；本地可以运行：
-
-~~~sh
-PACKAGE_ARCH=x86_64 .github/scripts/download-honk-binaries.sh
-PACKAGE_ARCH=aarch64 .github/scripts/download-honk-binaries.sh
-~~~
-
-然后将本仓库作为 feed 安装，或把软件包目录放入 buildroot，刷新 feed 并在 menuconfig 中选择两个软件包：
+将本仓库作为 feed 安装，或把软件包目录放入 buildroot，刷新 feed 并选择这些软件包：
 
 ~~~sh
 ./scripts/feeds update honk
 ./scripts/feeds install -a -p honk
 make menuconfig
+make package/honk/download V=s
 make package/honk/compile V=s
 make package/luci-app-honk/compile V=s
 make package/luci-app-honk-legacy/compile V=s
 ~~~
 
-SDK 路径只封装已放入目录的 Honk 二进制，不编译 Rust 或 eBPF。如果 `honk/files/bin/` 中缺少 `honk-core` 或 `honk-tool`，OpenWrt 会自动切换到 Rust package toolchain 的源码 fallback。
+`package/honk/compile` 始终从 GitHub 下载 `source.mk` 锁定的 Honk 上游归档，校验软件包哈希，应用 `honk/patches/`，使用锁定的 nightly 工具链构建 eBPF 对象，再为目标 OpenWrt 架构构建 `honk-core` 和 `honk-tool`。不再使用 `honk/files/bin` staging 目录，也不依赖二进制 Release。
 
 ### 单独构建 LuCI 前端
 
@@ -173,14 +143,12 @@ git diff --check
 
 `Update Honk upstream` 每天检查上游 `main`。发现新提交后，它会下载提交归档、计算 SHA-256 和 Git tree、验证本仓库的全部补丁，然后创建或更新 `automation/honk-upstream` PR。也可以从 Actions 页面手动运行该工作流。补丁冲突会直接中止更新，保留当前可构建版本。
 
-`Build Honk binaries` 工作流直接在标准 Linux Runner 上编译 Honk。两个并行任务通过 Zig 分别生成 x86_64 和 aarch64 的静态 musl 成品，全程不使用 OpenWrt SDK。每个架构归档包含 `honk-core`、`honk-tool`、构建清单和校验文件。
-
-二进制发布成功后，`Build packages` 会下载并校验对应归档，再启动 OpenWrt SDK 矩阵。只修改 LuCI 时会复用现有二进制发布。构建矩阵包括：
+`Build packages` 工作流在每个 OpenWrt SDK 矩阵任务中直接从锁定的上游源码构建 Honk。辅助脚本会安装锁定的 Rust host feed、nightly `rust-src` 和已校验的 `bpf-linker`，然后调用 `package/honk/download` 与 `package/honk/compile`。构建矩阵包括：
 
 - OpenWrt 24.10：x86_64 和 aarch64_generic 的 IPK。
 - OpenWrt 25.12：x86_64 和 aarch64_generic 的 APK。
 
-每个矩阵任务只封装已下载的二进制、服务文件和 LuCI 资源，不再编译 Rust 或 eBPF，并上传 `honk`、`luci-app-honk` 和 `luci-app-honk-legacy` 三个工作流产物。四组构建全部通过后，同一批文件会发布到带版本号的 GitHub Release。发布文件名会追加架构和 SDK，便于区分 LuCI 的全架构软件包。
+每个矩阵任务都会上传刚刚编译出的 `honk`、`luci-app-honk` 和 `luci-app-honk-legacy` 三个工作流产物。四组构建全部通过后，软件包会发布到带版本号的 GitHub Release。发布文件名会追加架构和 SDK，便于区分 LuCI 的全架构软件包。
 
 ## 安装
 

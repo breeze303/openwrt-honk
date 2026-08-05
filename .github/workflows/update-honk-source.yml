@@ -66,15 +66,15 @@ jobs:
           git commit -m "chore: update Honk upstream to $short_commit"
           git push --force origin "HEAD:$branch"
 
-          pull_url=$(gh pr list --base master --head "$branch" --state open --json url --jq '.[0].url // ""')
+          pull_url=$(gh pr list --base main --head "$branch" --state open --json url --jq '.[0].url // ""')
           if [ -z "$pull_url" ]; then
             gh pr create \
-              --base master \
+              --base main \
               --head "$branch" \
               --title "chore: update Honk upstream to $short_commit" \
-              --body "Updates Honk upstream from \`$OLD_COMMIT\` to \`$NEW_COMMIT\`.\n\nThe source archive, SHA-256, Git tree and local patch series were validated before this PR was created. After merge, the static binary and OpenWrt package workflows run automatically."
+              --body "Updates Honk upstream from \`$OLD_COMMIT\` to \`$NEW_COMMIT\`.\n\nThe source archive, SHA-256, Git tree and local patch series were validated before this PR was created. After merge, the OpenWrt package workflow builds Honk from source in the SDK matrix."
           else
             gh pr edit "$pull_url" \
               --title "chore: update Honk upstream to $short_commit" \
-              --body "Updates Honk upstream from \`$OLD_COMMIT\` to \`$NEW_COMMIT\`.\n\nThe source archive, SHA-256, Git tree and local patch series were validated before this PR was updated. After merge, the static binary and OpenWrt package workflows run automatically."
+              --body "Updates Honk upstream from \`$OLD_COMMIT\` to \`$NEW_COMMIT\`.\n\nThe source archive, SHA-256, Git tree and local patch series were validated before this PR was updated. After merge, the OpenWrt package workflow builds Honk from source in the SDK matrix."
           fi

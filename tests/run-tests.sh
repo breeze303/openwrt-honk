@@ -35,8 +35,6 @@ grep -F 'outbound_name != "direct" && !self.global_selection.is_empty() && selec
 sh -n honk/files/honk.init
 sh -n honk/files/honk-launcher
 bash -n .github/scripts/build-packages-in-sdk.sh
-bash -n .github/scripts/build-honk-binaries.sh
-bash -n .github/scripts/download-honk-binaries.sh
 bash -n .github/scripts/update-honk-source.sh
 bash -n .github/scripts/check-dashboard-assets.sh
 bash -n .github/scripts/provision-ui-cache.sh
@@ -49,39 +47,39 @@ bash -n tests/test-luci-v2-contract.sh
 bash -n tests/test-luci-package-isolation.sh
 bash -n tests/test-geo-rust.sh
 bash -n tests/test-init-geo-contract.sh
-grep -F 'BPF_RUST_TOOLCHAIN?=nightly' honk/Makefile >/dev/null
-grep -F 'HONK_USE_PREBUILT' honk/Makefile >/dev/null
-grep -F 'HONK_PREBUILT_DIR?=$(CURDIR)/files/bin' honk/Makefile >/dev/null
+grep -F 'BPF_RUST_TOOLCHAIN?=nightly-2026-07-27' honk/Makefile >/dev/null
+grep -F 'PKG_BUILD_DEPENDS:=rust/host' honk/Makefile >/dev/null
+grep -F 'PKG_SOURCE_URL:=https://github.com/Glassyiris/honk/archive' honk/source.mk >/dev/null
+grep -F 'cargo build --locked --release' honk/Makefile >/dev/null
 grep -F 'GEO_SITE_CACHE' honk/Makefile >/dev/null
 grep -F 'DAE_LOCATION_ASSET' honk/files/honk.init >/dev/null
-grep -F 'nightly-2026-07-27' .github/workflows/build-honk-binaries.yml >/dev/null
-grep -F 'RUST_STABLE_TOOLCHAIN: 1.97.1' .github/workflows/build-honk-binaries.yml >/dev/null
 grep -F 'openwrt-24.10' .github/workflows/build-packages.yml >/dev/null
 grep -F 'openwrt-25.12' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: ipk' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: apk' .github/workflows/build-packages.yml >/dev/null
-grep -F 'workflow_run:' .github/workflows/build-packages.yml >/dev/null
 grep -F 'schedule:' .github/workflows/update-honk-source.yml >/dev/null
 grep -F 'refs/heads/main' .github/workflows/update-honk-source.yml >/dev/null
 grep -F 'update-honk-source.sh' .github/workflows/update-honk-source.yml >/dev/null
-grep -F 'Download prebuilt Honk binaries' .github/workflows/build-packages.yml >/dev/null
+grep -F 'Prepare locked Geo assets' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package/luci-app-honk/compile' .github/scripts/build-packages-in-sdk.sh >/dev/null
-grep -F -- '--profile release-musl' .github/scripts/build-honk-binaries.sh >/dev/null
-grep -F 'ZIGCC_TARGET' .github/scripts/build-honk-binaries.sh >/dev/null
-grep -F "grep -q 'INTERP'" .github/scripts/build-honk-binaries.sh >/dev/null
-grep -F -- '--retry-all-errors' .github/scripts/download-honk-binaries.sh >/dev/null
-grep -F 'honk_binaries_' .github/workflows/build-honk-binaries.yml >/dev/null
-grep -F 'pull_request:' .github/workflows/build-honk-binaries.yml >/dev/null
-grep -F "if: github.event_name != 'pull_request'" .github/workflows/build-honk-binaries.yml >/dev/null
-grep -F 'rust_target: aarch64-unknown-linux-musl' .github/workflows/build-honk-binaries.yml >/dev/null
-grep -F 'rust_target: x86_64-unknown-linux-musl' .github/workflows/build-honk-binaries.yml >/dev/null
-test "$(grep -c 'rust_target:' .github/workflows/build-honk-binaries.yml)" -eq 2
-if grep -Eq 'docker run|openwrt-[0-9]' .github/workflows/build-honk-binaries.yml; then
-	echo 'binary workflow must build independently from OpenWrt SDKs' >&2
+grep -F 'package/honk/download' .github/scripts/build-packages-in-sdk.sh >/dev/null
+grep -F 'package/honk/compile' .github/scripts/build-packages-in-sdk.sh >/dev/null
+grep -F 'rustup toolchain install' .github/scripts/build-packages-in-sdk.sh >/dev/null
+grep -F 'bpf-linker' .github/scripts/build-packages-in-sdk.sh >/dev/null
+grep -F 'packages_lang_rust.git' .github/scripts/build-packages-in-sdk.sh >/dev/null
+test ! -e .github/workflows/build-honk-binaries.yml
+test ! -e .github/scripts/build-honk-binaries.sh
+test ! -e .github/scripts/download-honk-binaries.sh
+if grep -Eq 'HONK_USE_PREBUILT|HONK_PREBUILT_DIR' honk/Makefile; then
+	echo 'honk package must always build from source' >&2
 	exit 1
 fi
-if grep -Eq 'rustup|cargo|bpf-linker|libclang' .github/scripts/build-packages-in-sdk.sh .github/workflows/build-packages.yml; then
-	echo 'package workflow must only stage prebuilt Honk binaries' >&2
+if grep -Eq 'workflow_run|binary_release_tag|download-honk-binaries|Build Honk binaries' .github/workflows/build-packages.yml; then
+	echo 'package workflow must not depend on binary releases' >&2
+	exit 1
+fi
+if grep -Fq 'honk/files/bin/' .gitignore; then
+	echo 'prebuilt Honk staging directory must not be part of the package contract' >&2
 	exit 1
 fi
 grep -F 'LAUNCHER=/usr/libexec/honk/honk-launcher' honk/files/honk.init >/dev/null
