@@ -17,7 +17,7 @@
     "patchDigests": [
       {
         "path": "honk/patches/100-beta35-openwrt-contracts.patch",
-        "sha256": "4fb07d63122b851b016e5d9ef426a7aecb267868562dd7a24f2774e7770e1808"
+        "sha256": "feb9bf59e25e9fe53a38899d27031d07d4400af5143d52ba356180291cb9d784"
       },
       {
         "path": "honk/patches/110-beta35-local-time.patch",

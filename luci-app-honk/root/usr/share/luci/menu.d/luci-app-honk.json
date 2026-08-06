@@ -64,5 +64,11 @@
 	},
 	"admin/services/honk/api/apply_interfaces": {
 		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_apply_interfaces" }
+	},
+	"admin/services/honk/api/geo_settings": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_geo_settings" }
+	},
+	"admin/services/honk/api/geo_download": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_geo_download" }
 	}
 }

@@ -1502,7 +1502,7 @@ new file mode 100644
 index 0000000..afe45a1
 --- /dev/null
 +++ b/crates/honk-tool/src/geo.rs
-@@ -0,0 +1,419 @@
+@@ -0,0 +1,437 @@
 +use anyhow::{Context, Result};
 +use clap::{Args, Subcommand};
 +use serde_json::{Value, json};
@@ -1538,6 +1538,8 @@ index 0000000..afe45a1
 +pub struct CapabilityArgs {
 +    #[arg(long)]
 +    pub json: bool,
++    #[arg(long)]
++    pub only: Option<String>,
 +    #[arg(long, value_delimiter = ',', default_value = "gfw,cn,private")]
 +    pub labels: Vec<String>,
 +    #[arg(long = "geoip-labels", value_delimiter = ',', default_value = "cn")]
@@ -1641,10 +1643,15 @@ index 0000000..afe45a1
 +            false,
 +        );
 +    }
++    let allow_custom = std::env::var("DAE_ALLOW_CUSTOM_GEO").ok().as_deref() == Some("1");
++    let staging = std::env::var("DAE_GEO_STAGING").ok().as_deref() == Some("1");
 +    if actual_sha != expected_sha || metadata.len() != expected_size {
++        if allow_custom {
++            return ("CUSTOM", resolved_path, metadata.len(), true);
++        }
 +        return ("TAMPERED", resolved_path, metadata.len(), false);
 +    }
-+    if provider == "LOYALSOLDIER" && !resolved_path.starts_with("/usr/lib/honk/") {
++    if provider == "LOYALSOLDIER" && !staging && !resolved_path.starts_with("/usr/lib/honk/") {
 +        return ("CUSTOM_UNSUPPORTED", resolved_path, metadata.len(), false);
 +    }
 +    (
@@ -1669,11 +1676,12 @@ index 0000000..afe45a1
 +    };
 +    let pid = value.get("pid").and_then(Value::as_u64).unwrap_or(0);
 +    let alive = pid > 0 && Path::new(&format!("/proc/{pid}")).exists();
++    let provider = value.get("provider").and_then(Value::as_str).unwrap_or("");
 +    let matching = alive
-+        && value.get("provider").and_then(Value::as_str) == Some("LOYALSOLDIER_LOCKED")
++        && (provider == "LOYALSOLDIER_LOCKED" || provider == "CUSTOM")
 +        && value.get("geositeSha256").and_then(Value::as_str) == Some(site_sha)
 +        && value.get("geoipSha256").and_then(Value::as_str) == Some(ip_sha);
-+    json!({"status": if matching {"LOYALSOLDIER_LOCKED"} else {"STALE"}, "matching":matching, "receipt":value})
++    json!({"status": if matching {provider} else {"STALE"}, "matching":matching, "receipt":value})
 +}
 +
 +pub fn run(command: GeoCommand) -> Result<()> {
@@ -1687,13 +1695,22 @@ index 0000000..afe45a1
 +    let dir = asset_dir();
 +    let site = dir.join("geosite.dat");
 +    let ip = dir.join("geoip.dat");
++    if let Some(only) = args.only.as_deref() {
++        if only != "geosite" && only != "geoip" {
++            anyhow::bail!("--only must be geosite or geoip")
++        }
++    }
++    let check_site = args.only.as_deref() != Some("geoip");
++    let check_ip = args.only.as_deref() != Some("geosite");
 +    let (disk_status, site_resolved, site_size, site_hash_ok) =
 +        status_for(&site, LOCK_SITE_SHA, LOCK_SITE_SIZE, "LOYALSOLDIER");
 +    let (ip_status, ip_resolved, ip_size, ip_hash_ok) =
 +        status_for(&ip, LOCK_IP_SHA, LOCK_IP_SIZE, "V2FLY");
 +    let site_sha = sha256(&site).unwrap_or_default();
 +    let ip_sha = sha256(&ip).unwrap_or_default();
-+    let labels: Vec<Value> = if site_hash_ok {
++    let labels: Vec<Value> = if !check_site {
++        Vec::new()
++    } else if site_hash_ok {
 +        requested_labels(&site, &args.labels)
 +    } else {
 +        args.labels
@@ -1701,7 +1718,9 @@ index 0000000..afe45a1
 +            .map(|label| json!({"label": label, "present": false}))
 +            .collect()
 +    };
-+    let geoip_labels: Vec<Value> = if ip_hash_ok {
++    let geoip_labels: Vec<Value> = if !check_ip {
++        Vec::new()
++    } else if ip_hash_ok {
 +        requested_labels(&ip, &args.geoip_labels)
 +    } else {
 +        args.geoip_labels
@@ -1715,27 +1734,26 @@ index 0000000..afe45a1
 +    let all_geoip = geoip_labels
 +        .iter()
 +        .all(|v| v.get("present").and_then(Value::as_bool).unwrap_or(false));
-+    let combined_disk_status = if disk_status != "LOYALSOLDIER_LOCKED" {
++    let combined_disk_status = if check_site && disk_status != "LOYALSOLDIER_LOCKED" && disk_status != "CUSTOM" {
 +        disk_status
-+    } else if ip_status != "V2FLY_LOCKED" {
++    } else if check_ip && ip_status != "V2FLY_LOCKED" && ip_status != "CUSTOM" {
 +        if ip_status == "V2FLY_GFW_UNSUPPORTED" {
 +            "V2FLY_GFW_UNSUPPORTED"
 +        } else {
 +            "TAMPERED"
 +        }
 +    } else {
-+        "LOYALSOLDIER_LOCKED"
++        if disk_status == "CUSTOM" || ip_status == "CUSTOM" { "CUSTOM" } else { "LOYALSOLDIER_LOCKED" }
 +    };
 +    let active = live_status(&site_sha, &ip_sha);
 +    let active_status = active
 +        .get("status")
 +        .and_then(Value::as_str)
 +        .unwrap_or("STALE");
-+    let ok = (disk_status == "LOYALSOLDIER_LOCKED"
-+        && ip_status == "V2FLY_LOCKED"
-+        && all_labels
-+        && all_geoip)
-+        || (args.labels.is_empty() && args.geoip_labels.is_empty());
++    let site_ok = !check_site || ((disk_status == "LOYALSOLDIER_LOCKED" || disk_status == "CUSTOM") && all_labels);
++    let ip_ok = !check_ip || ((ip_status == "V2FLY_LOCKED" || ip_status == "CUSTOM") && all_geoip);
++    let ok = (site_ok && ip_ok)
++        || (args.labels.is_empty() && args.geoip_labels.is_empty() && args.only.is_some());
 +    let output = json!({
 +        "schemaVersion":"honk.geo.v1",
 +        "ok":ok,
@@ -1746,7 +1764,7 @@ index 0000000..afe45a1
 +        "hashes":{"geosite":site_sha,"geoip":ip_sha},
 +        "sizes":{"geosite":site_size,"geoip":ip_size},
 +        "lockVersion":"202607312254/202607171233",
-+        "provider":"LOYALSOLDIER_LOCKED",
++        "provider":if disk_status == "CUSTOM" || ip_status == "CUSTOM" {"CUSTOM"} else {"LOYALSOLDIER_LOCKED"},
 +        "providers":{"geosite":disk_status,"geoip":ip_status},
 +        "labels":labels,
 +        "geoipLabels":geoip_labels,

@@ -234,7 +234,38 @@ textarea { padding: 10px 11px; line-height: 1.5; resize: vertical; }
 .diagnostic-item i { width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: #9aa4a7; }
 .diagnostic-item i.ok { background: #24a36a; }
 .diagnostic-item i.warn { background: #c67a12; }
-.service-controls { display: flex; gap: 10px; margin: 18px 0; }
+.geo-panel, .runtime-files-panel { margin-top: 18px; }
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.section-heading h2 { margin: 0; font-size: 17px; }
+.section-heading p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+.geo-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.geo-settings-grid label { min-width: 0; }
+.geo-settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.checkbox-field { display: flex; align-items: center; gap: 8px; min-height: 44px; color: var(--text); }
+.checkbox-field input { width: 19px; height: 19px; }
+.checkbox-field span { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; }
+.geo-asset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.geo-asset-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-muted); }
+.geo-asset-card header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.geo-asset-card header > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.geo-asset-card header svg { color: var(--info); }
+.geo-asset-card dl { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 0 10px; margin: 14px 0; font-size: 12px; }
+.geo-asset-card dt, .geo-asset-card dd { min-width: 0; margin: 0; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.geo-asset-card dt { color: var(--muted); }
+.geo-asset-card dd { overflow-wrap: anywhere; }
+.geo-asset-card code { color: var(--muted); font-size: 11px; }
+.geo-asset-card > button { width: 100%; min-height: 38px; }
+.status-tag.ok { color: var(--success); background: #edf8f1; }
+.status-tag.warn { color: var(--warning); background: #fff4df; }
+.runtime-file-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
+.runtime-file-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-width: 0; min-height: 58px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.runtime-file-row > div { display: grid; min-width: 0; gap: 2px; }
+.runtime-file-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.runtime-file-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+.runtime-file-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
+.runtime-file-row > span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.icon-ok { color: var(--success); }
+.icon-warn { color: var(--warning); }
 .diagnostic-detail { padding: 18px 0; border-top: 1px solid var(--line); }
 .diagnostic-detail h2 { margin: 0 0 12px; font-size: 17px; }
 .diagnostic-detail dl { display: grid; grid-template-columns: 150px minmax(0, 1fr); margin: 0; }
@@ -297,6 +328,9 @@ textarea { padding: 10px 11px; line-height: 1.5; resize: vertical; }
   .field-row .grow { grid-column: 1 / -1; grid-row: 1; }
   .field-row .icon-command { align-self: end; justify-self: end; }
   .diagnostic-grid { grid-template-columns: 1fr 1fr; }
+  .geo-settings-grid, .geo-asset-grid, .runtime-file-list { grid-template-columns: 1fr; }
+  .section-heading, .geo-settings-actions { align-items: stretch; flex-direction: column; }
+  .section-heading .secondary-button, .geo-settings-actions .primary-command { width: 100%; }
   .preview-grid { grid-template-columns: 1fr; }
   .modal-backdrop { align-items: end; padding: 0; }
   .modal { width: 100%; max-height: calc(100dvh - 32px); border-radius: 8px 8px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); }
@@ -325,8 +359,7 @@ textarea { padding: 10px 11px; line-height: 1.5; resize: vertical; }
   .rule-row { grid-template-columns: 22px minmax(0, 1fr) 64px 44px; }
   .rule-row > span { display: none; }
   .diagnostic-grid { grid-template-columns: 1fr; }
-  .service-controls { display: grid; grid-template-columns: 1fr 1fr; }
-  .service-controls .danger-button { grid-column: 1 / -1; }
+  .geo-asset-card dl { grid-template-columns: 64px minmax(0, 1fr); }
   .sticky-actions.split { display: grid; grid-template-columns: 1fr 1fr; }
   .sticky-actions.split > :first-child { grid-column: 1 / -1; margin: 0; }
 }

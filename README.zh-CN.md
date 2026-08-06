@@ -181,9 +181,9 @@ Quick Setup 永远是 Honk 的首个页面。它复用现有订阅和节点数�
 | GeoSite | Loyalsoldier release `202607312254`，SHA-256 `1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f` | `/usr/lib/honk/geosite.dat` | `/usr/share/honk/geosite.dat` |
 | GeoIP | V2Fly release `202607171233`，SHA-256 `b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a` | `/usr/lib/honk/geoip.dat` | `/usr/share/honk/geoip.dat` |
 
-`/usr/share/honk/geo.lock.json` 和 `/run/honk/geo-assets.json` 记录来源与生效 receipt。检测到 V2Fly/custom GeoSite 路径、标签缺失或哈希不匹配时，只会禁用依赖锁定 GeoSite 的预设。需要确认的 Geo 修复操作会先验证包内 payload，再重建 Honk 自己拥有的 symlink；不会触碰 `/usr/share/v2ray`，也不会下载规则。修复后仍需显式重启服务，直到 live receipt 匹配才重新开放这些预设。
+`/usr/share/honk/geo.lock.json` 和 `/run/honk/geo-assets.json` 记录来源与生效 receipt。新版诊断页会分别显示 GeoSite、GeoIP 的文件、哈希、标签和 live receipt 状态，并允许编辑地址后单独下载或全部下载。默认下载仍要求匹配锁定 SHA-256；打开“允许自定义 Geo 数据”后，会改为格式和标签校验并显示 `CUSTOM` 状态。下载使用临时文件和原子替换，不触碰 `/usr/share/v2ray`；服务运行时更新后需要显式重启 Honk。
 
-Quick mutation 由 `/usr/libexec/honk/quick-transaction-worker` 处理。它把旧配置字节保存到 root-only sidecar，记录每个可恢复阶段；重启、订阅等待或 probe 失败时恢复之前的运行或停止状态。恢复本身失败会明确标记为 `degraded`，等待运维处理。直连预设不要求代理订阅即可应用；其他预设必须有非空且已校验的源组，并通过 Geo、DNS、接口门禁。Geo 数据通过更新 lock 与软件包输入升级，不提供在线 LuCI 更新入口。
+Quick mutation 由 `/usr/libexec/honk/quick-transaction-worker` 处理。它把旧配置字节保存到 root-only sidecar，记录每个可恢复阶段；重启、订阅等待或 probe 失败时恢复之前的运行或停止状态。恢复本身失败会明确标记为 `degraded`，等待运维处理。直连预设不要求代理订阅即可应用；其他预设必须有非空且已校验的源组，并通过 Geo、DNS、接口门禁。Geo 下载地址和自定义策略保存在 `/etc/config/honk`。
 
 ## 运行路径
 

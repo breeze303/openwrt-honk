@@ -45,7 +45,6 @@ bash -n honk/files/quick-transaction-worker
 bash -n tests/test-dns-projection.sh
 bash -n tests/test-luci-v2-contract.sh
 bash -n tests/test-luci-package-isolation.sh
-bash -n tests/test-geo-rust.sh
 bash -n tests/test-init-geo-contract.sh
 grep -F 'BPF_RUST_TOOLCHAIN?=nightly-2026-07-27' honk/Makefile >/dev/null
 grep -F 'PKG_BUILD_DEPENDS:=rust/host' honk/Makefile >/dev/null
@@ -53,6 +52,17 @@ grep -F 'PKG_SOURCE_URL:=https://github.com/Glassyiris/honk/archive' honk/source
 grep -F 'cargo build --locked --release' honk/Makefile >/dev/null
 grep -F 'GEO_SITE_CACHE' honk/Makefile >/dev/null
 grep -F 'DAE_LOCATION_ASSET' honk/files/honk.init >/dev/null
+grep -F 'DAE_ALLOW_CUSTOM_GEO' honk/files/honk.init >/dev/null
+grep -F 'write_live_receipt' honk/files/honk.init >/dev/null
+grep -F "ls -ln " luci-app-honk/luasrc/model/service.lua >/dev/null
+if grep -Fq 'stat -c %s' luci-app-honk/luasrc/model/service.lua; then
+	echo 'runtime diagnostics must use BusyBox base commands' >&2
+	exit 1
+fi
+grep -F 'option geosite_url' honk/files/honk.config >/dev/null
+grep -F 'option geoip_url' honk/files/honk.config >/dev/null
+grep -F 'option allow_custom_geo' honk/files/honk.config >/dev/null
+grep -F 'pub only: Option<String>' honk/patches/100-beta35-openwrt-contracts.patch >/dev/null
 grep -F 'openwrt-24.10' .github/workflows/build-packages.yml >/dev/null
 grep -F 'openwrt-25.12' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: ipk' .github/workflows/build-packages.yml >/dev/null
@@ -103,6 +113,8 @@ jq empty luci-app-honk-legacy/root/usr/share/rpcd/acl.d/luci-app-honk-legacy.jso
 jq empty luci-app-honk-legacy/root/usr/share/luci/menu.d/luci-app-honk-legacy.json
 grep -F '"path": "honk/dashboard"' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
 grep -F '"function": "api_preview"' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
+grep -F 'geo_settings' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
+grep -F 'geo_download' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
 grep -F '"path": "honk_legacy/dashboard"' luci-app-honk-legacy/root/usr/share/luci/menu.d/luci-app-honk-legacy.json >/dev/null
 grep -F '"function": "api_dashboard_prepare"' luci-app-honk-legacy/root/usr/share/luci/menu.d/luci-app-honk-legacy.json >/dev/null
 
@@ -140,6 +152,15 @@ grep -F 'DnsTopology' luci-app-honk-legacy/ui/src/ConfigView.vue >/dev/null
 grep -F 'expectedRunning' luci-app-honk-legacy/ui/src/composables/useRuntime.ts >/dev/null
 grep -F "id: 'home' as const" luci-app-honk/ui/src/App.vue >/dev/null
 grep -F "id: 'diagnostics' as const" luci-app-honk/ui/src/App.vue >/dev/null
+if grep -Fq 'service-controls' luci-app-honk/ui/src/views/DiagnosticsView.vue; then
+	echo 'diagnostics must use the global service controls' >&2
+	exit 1
+fi
+grep -F 'function M.geo_settings' luci-app-honk/luasrc/model/service.lua >/dev/null
+grep -F 'function M.geo_download' luci-app-honk/luasrc/model/service.lua >/dev/null
+grep -F 'runtimeCore' luci-app-honk/ui/src/i18n.ts >/dev/null
+grep -F 'geoDownload' luci-app-honk/ui/src/api.ts >/dev/null
+grep -F 'geo-asset-grid' luci-app-honk/ui/src/views/DiagnosticsView.vue >/dev/null
 grep -F "id: 'logs' as const" luci-app-honk/ui/src/App.vue >/dev/null
 grep -F "china-proxy" luci-app-honk/ui/src/views/HomeView.vue >/dev/null
 grep -F "ADVANCED_TAKEOVER_REQUIRED" luci-app-honk/luasrc/model/service.lua >/dev/null

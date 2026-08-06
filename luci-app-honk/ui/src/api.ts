@@ -116,5 +116,7 @@ export const api = {
   networkInterfaces: () => request<NetworkDiscovery>('network_interfaces'),
   applyInterfaces: (input: { lanDevice: string; wanDevice: string; dialMode: DialMode; expectedRevision: string }) => request<{ ok: boolean; revision: string; running: boolean; interfaces: { lan: string; wan: string }; dialMode: DialMode; config?: string }>('apply_interfaces', input),
   diagnostics: () => request<DiagnosticsResponse>('diagnostics'),
+  geoSettings: (input: { geositeUrl: string; geoipUrl: string; allowCustom: boolean }) => request<{ ok: boolean; geositeUrl: string; geoipUrl: string; allowCustom: boolean }>('geo_settings', input),
+  geoDownload: (kind: 'geosite' | 'geoip') => request<{ ok: boolean; kind: string; path: string; status?: string; needsRestart: boolean }>('geo_download', { kind }),
   logs: () => request<{ ok: boolean; lines: string }>('logs'),
 }

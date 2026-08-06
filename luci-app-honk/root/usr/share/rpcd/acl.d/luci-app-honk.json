@@ -20,8 +20,10 @@
 		},
 		"write": {
 			"file": [
+				"/etc/config/honk",
 				"/etc/honk/config.dae",
 				"/etc/honk/config.dae.last-good",
+				"/usr/lib/honk/**",
 				"/run/honk/luci-*.json",
 				"/run/honk/luci-*.lock"
 			],

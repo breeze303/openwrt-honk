@@ -38,6 +38,13 @@ package.preload["luci.jsonc"] = function()
 		stringify = function() return "{}" end,
 	}
 end
+package.preload["luci.model.uci"] = function()
+	return {
+		cursor = function()
+			return { get = function() return nil end }
+		end,
+	}
+end
 
 local alive, init_calls = true, 0
 package.preload["luci.sys"] = function()

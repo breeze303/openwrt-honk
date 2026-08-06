@@ -70,7 +70,7 @@
   - `git diff --check`
   - LuCI `npm run typecheck`
   - LuCI `npm run build`
-  - 现有 `tests/test-default-config.sh`
+  - 现有 `tests/run-tests.sh` 默认配置与 LuCI 契约检查
   - 现有 LuCI/init/事务测试
 - 使用 ImmortalWrt SDK 编译 Honk 与 LuCI APK。
 - 上传并安装到：`192.168.1.230:2222`，用户 `root`，临时密码记录在项目运维记录中。

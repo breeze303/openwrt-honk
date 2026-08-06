@@ -54,6 +54,9 @@ validate_geo_assets() {
 	set -- --json
 	[ -z "$geosite_labels" ] || set -- "$@" --labels "$geosite_labels"
 	[ -z "$geoip_labels" ] || set -- "$@" --geoip-labels "$geoip_labels"
+	[ -z "$geosite_labels" ] && [ -n "$geoip_labels" ] && set -- "$@" --only geoip
+	[ -z "$geoip_labels" ] && [ -n "$geosite_labels" ] && set -- "$@" --only geosite
+	[ "${ALLOW_CUSTOM_GEO:-0}" -eq 1 ] && export DAE_ALLOW_CUSTOM_GEO=1 || unset DAE_ALLOW_CUSTOM_GEO
 	result="$(DAE_LOCATION_ASSET="$ASSET_DIR" /usr/bin/honk-tool geo capabilities "$@" 2>&1)" || {
 		printf '%s\n' "$result" >"$ASSET_RECEIPT"
 		chmod 600 "$ASSET_RECEIPT"
@@ -65,10 +68,28 @@ validate_geo_assets() {
 	return 0
 }
 
+write_live_receipt() {
+	local previous_pids="${1:-}" pid provider geosite_sha geoip_sha
+	pid="$(ubus call service list '{"name":"honk"}' 2>/dev/null | jsonfilter -e '@.honk.instances.honk.pid' 2>/dev/null)"
+	[ -n "$pid" ] || return 1
+	case " $previous_pids " in
+		*" $pid "*) return 1 ;;
+	esac
+	[ -s "$ASSET_RECEIPT" ] || return 1
+	provider="$(jq -r '.provider // ""' "$ASSET_RECEIPT" 2>/dev/null)"
+	geosite_sha="$(jq -r '.hashes.geosite // ""' "$ASSET_RECEIPT" 2>/dev/null)"
+	geoip_sha="$(jq -r '.hashes.geoip // ""' "$ASSET_RECEIPT" 2>/dev/null)"
+	[ -n "$provider" ] || return 1
+	printf '%s\n' "{\"schemaVersion\":\"honk.geo-live.v1\",\"pid\":$pid,\"provider\":\"$provider\",\"geositeSha256\":\"$geosite_sha\",\"geoipSha256\":\"$geoip_sha\"}" >"$LIVE_RECEIPT"
+	chmod 600 "$LIVE_RECEIPT"
+}
+
 start_service() {
-	local respawn
+	local respawn previous_pids
 	config_load honk
 	config_get_bool respawn main respawn 1
+	config_get_bool ALLOW_CUSTOM_GEO main allow_custom_geo 0
+	previous_pids="$(pidof honk-core 2>/dev/null || true)"
 	mkdir -p "$RUN_DIR" || return 1
 	if [ -x /usr/libexec/honk/quick-transaction-worker ]; then
 		HONK_QUICK_RECOVERY_FROM_INIT=1 /usr/libexec/honk/quick-transaction-worker --recover >/run/honk/quick-recovery.json 2>&1 || {
@@ -110,6 +131,14 @@ start_service() {
 	[ "$respawn" -eq 1 ] && procd_set_param respawn 3600 5 5
 	procd_set_param limits nofile="65536 65536"
 	procd_close_instance
+	(
+		for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+			if write_live_receipt "$previous_pids"; then
+				break
+			fi
+			sleep 1
+		done
+	) &
 }
 
 stop_service() {

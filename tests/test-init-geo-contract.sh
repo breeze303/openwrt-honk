@@ -20,6 +20,12 @@ grep -F 'DAE_LOCATION_ASSET="$ASSET_DIR"' "$init" >/dev/null || fail "asset dire
 grep -F 'rm -f "$LIVE_RECEIPT"' "$init" >/dev/null || fail "stale live receipt is not cleared"
 grep -F 'CONFIG_SHA_BEFORE' "$init" >/dev/null || fail "config TOCTOU check missing"
 grep -F 'HONK_QUICK_RECOVERY_FROM_INIT=1' "$init" >/dev/null || fail "recovery recursion guard missing"
+grep -F 'DAE_ALLOW_CUSTOM_GEO=1' "$init" >/dev/null || fail "custom Geo policy is not passed to honk-tool"
+grep -F 'write_live_receipt' "$init" >/dev/null || fail "live Geo receipt writer missing"
+grep -F 'ubus call service list' "$init" >/dev/null || fail "live receipt does not use the procd instance"
+grep -F 'previous_pids' "$init" >/dev/null || fail "live receipt does not reject the previous process"
+grep -F -- '--only geoip' "$init" >/dev/null || fail "single-asset Geo preflight is missing"
+grep -F "option allow_custom_geo '0'" "$repo_root/honk/files/honk.config" >/dev/null || fail "custom Geo default is not locked"
 pass "init preflight, reference enumeration and TOCTOU guards"
 
 printf '%s\n' '{"schemaVersion":"honk.init-geo.v1","ok":true,"checks":["validate","actual-geo-refs","asset-path","config-sha-before-after","stale-live-cleanup"],"assertions":7}' >"$evidence/init-contract.json"

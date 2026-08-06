@@ -114,7 +114,7 @@ onBeforeUnmount(() => {
         <NodesView v-else-if="active === 'nodes'" :state="state" @changed="refresh" @notice="showNotice" @error="message => error = message" />
         <DevicesView v-else-if="active === 'devices'" :state="state" @changed="refresh" @notice="showNotice" @error="message => error = message" />
         <AdvancedView v-else-if="active === 'advanced'" @changed="refresh" @notice="showNotice" @error="message => error = message" />
-        <DiagnosticsView v-else-if="active === 'diagnostics'" @changed="refresh" @notice="showNotice" @error="message => error = message" />
+        <DiagnosticsView v-else-if="active === 'diagnostics'" @notice="showNotice" @error="message => error = message" />
         <LogsView v-else @error="message => error = message" />
         <div v-if="loading && !state" class="initial-loading"><Gauge :size="22" class="spin" /><span>{{ t('loading') }}</span></div>
       </main>

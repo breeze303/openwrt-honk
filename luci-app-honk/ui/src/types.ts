@@ -104,9 +104,64 @@ export type DiagnosticsResponse = {
   ok: boolean
   service: { running: boolean; init: boolean }
   config: { valid: boolean; detail: string; revision: string; bytes: number }
-  geo: { valid: boolean; detail: Record<string, unknown> }
-  files: { config: boolean; backup: boolean; tool: boolean }
+  geo: { valid: boolean; detail: GeoDiagnostics; settings: GeoSettings }
+  files: {
+    valid: boolean
+    core: RuntimeFileDiagnostic
+    tool: RuntimeFileDiagnostic
+    init: RuntimeFileDiagnostic
+    config: RuntimeFileDiagnostic
+    defaultConfig: RuntimeFileDiagnostic
+    backup: RuntimeFileDiagnostic
+    launcher: RuntimeFileDiagnostic
+    interfaceDiscovery: RuntimeFileDiagnostic
+    quickWorker: RuntimeFileDiagnostic
+    geoLock: RuntimeFileDiagnostic
+  }
   last: LastState
+}
+
+export type RuntimeFileDiagnostic = {
+  path: string
+  exists: boolean
+  regular: boolean
+  executable: boolean
+  size: number
+  ok: boolean
+  reason?: string
+  version?: string
+}
+
+export type GeoSettings = {
+  geosite: string
+  geoip: string
+  allowCustom: boolean
+}
+
+export type GeoAssetDiagnostic = {
+  kind: 'geosite' | 'geoip'
+  path: string
+  resolvedPath?: string
+  status: string
+  labels: Array<{ label: string; present: boolean }>
+  labelsValid: boolean
+  sha256?: string
+  size: number
+  url: string
+  ok: boolean
+}
+
+export type GeoDiagnostics = {
+  valid: boolean
+  diskStatus: string
+  activeStatus: string
+  active: Record<string, unknown>
+  activeValid?: boolean
+  allowCustom: boolean
+  assets: { geosite: GeoAssetDiagnostic; geoip: GeoAssetDiagnostic }
+  lockVersion?: string
+  provider?: string
+  raw?: Record<string, unknown>
 }
 
 export type DialMode = 'ip' | 'domain' | 'domain+' | 'domain++'
