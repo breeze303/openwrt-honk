@@ -2,38 +2,38 @@
   "schemaVersion": 1,
   "source": {
     "archive": {
-      "offlinePath": ".cache/dl/honk-435c12dc8366e871bf4706c7986d03ca613840fc.tar.gz",
-      "sha256": "4b8c6e46bd837fd1ccc785a3fa9c5036c36a925fc2fa832216f0a9dfa79f6b70",
-      "size": 1167028,
-      "topLevelDirectory": "honk-435c12dc8366e871bf4706c7986d03ca613840fc",
-      "url": "https://github.com/Glassyiris/honk/archive/435c12dc8366e871bf4706c7986d03ca613840fc.tar.gz"
+      "offlinePath": ".cache/dl/honk-42051071cb77275276ee17305d947df95b348fc2.tar.gz",
+      "sha256": "62cdc76ab0ce73457e61c7923d1138baa0d65ae94c6ffcbadbb1e60831737526",
+      "size": 1254003,
+      "topLevelDirectory": "honk-42051071cb77275276ee17305d947df95b348fc2",
+      "url": "https://github.com/Glassyiris/honk/archive/42051071cb77275276ee17305d947df95b348fc2.tar.gz"
     },
     "canonicalUrl": "https://github.com/Glassyiris/honk.git",
-    "commit": "435c12dc8366e871bf4706c7986d03ca613840fc",
+    "commit": "42051071cb77275276ee17305d947df95b348fc2",
     "license": {
-      "sourceLicenseUrl": "https://github.com/Glassyiris/honk/blob/435c12dc8366e871bf4706c7986d03ca613840fc/LICENSE",
+      "sourceLicenseUrl": "https://github.com/Glassyiris/honk/blob/42051071cb77275276ee17305d947df95b348fc2/LICENSE",
       "spdx": "GPL-3.0-only"
     },
     "patchDigests": [
       {
-        "path": "honk/patches/100-beta35-openwrt-contracts.patch",
-        "sha256": "feb9bf59e25e9fe53a38899d27031d07d4400af5143d52ba356180291cb9d784"
+        "path": "honk/patches/100-beta40-openwrt-contracts.patch",
+        "sha256": "f0fd03cdddd928f8c175ca58432dcd537770dfe403b0355901cfe34044959764"
       },
       {
-        "path": "honk/patches/110-beta35-local-time.patch",
-        "sha256": "610f9f6ab0fe955e6bab3173610f8963c478d2f49583430f7798f7b953ef156c"
+        "path": "honk/patches/110-beta40-local-time.patch",
+        "sha256": "bc291044c185d72c3a28bfe1cf17aa80d828f38a3c2838388ae049aafae4853c"
       }
     ],
     "provenance": {
       "archiveSource": "GitHub commit archive",
       "observedFrom": "refs/heads/main",
-      "providerPath": "github.com/Glassyiris/honk/archive/435c12dc8366e871bf4706c7986d03ca613840fc.tar.gz"
+      "providerPath": "github.com/Glassyiris/honk/archive/42051071cb77275276ee17305d947df95b348fc2.tar.gz"
     },
     "tagObservation": {
-      "name": "v0.0.1.beta.35",
-      "object": "435c12dc8366e871bf4706c7986d03ca613840fc",
+      "name": "v0.0.1.beta.40",
+      "object": "42051071cb77275276ee17305d947df95b348fc2",
       "signatureStatus": "unverified"
     },
-    "tree": "b4f31ceae12bb0baeaabbda386ae4bf7c0fc3210"
+    "tree": "379792a535ad6831e1de923280155f96ed12cb7c"
   }
 }

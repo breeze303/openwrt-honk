@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
 PKG_VERSION:=0.0.1_git
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKG_LICENSE:=GPL-3.0-only
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=Honk OpenWrt feed
@@ -46,7 +46,7 @@ define Package/honk/conffiles
 endef
 
 RUST_TARGET:=$(RUSTC_TARGET_ARCH)
-BPF_RUST_TOOLCHAIN?=nightly-2026-07-27
+BPF_RUST_TOOLCHAIN?=nightly-2026-07-20
 BPF_CARGO?=rustup run $(BPF_RUST_TOOLCHAIN) cargo
 BPF_RUSTC?=$(shell rustup which --toolchain $(BPF_RUST_TOOLCHAIN) rustc 2>/dev/null)
 HONK_CORE_BINARY:=$(PKG_BUILD_DIR)/target/$(RUST_TARGET)/release/honk-core

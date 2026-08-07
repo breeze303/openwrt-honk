@@ -65,7 +65,7 @@ sudo apt-get install -y \
 The source build runs inside the OpenWrt SDK. The SDK helper installs Rustup, the pinned BPF nightly toolchain, the pinned Rust feed revision, and `bpf-linker` `0.10.4`:
 
 ~~~sh
-rustup toolchain install nightly-2026-07-27 --profile minimal \
+rustup toolchain install nightly-2026-07-20 --profile minimal \
   --component rust-src
 ~~~
 

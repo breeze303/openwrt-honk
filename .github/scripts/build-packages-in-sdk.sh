@@ -4,7 +4,7 @@ set -euo pipefail
 readonly feed_dir=${FEED_DIR:-/feed}
 readonly artifacts_dir=${ARTIFACTS_DIR:-/artifacts}
 readonly feed_name=${FEED_NAME:-honk_ci}
-readonly bpf_toolchain=${BPF_RUST_TOOLCHAIN:-nightly-2026-07-27}
+readonly bpf_toolchain=${BPF_RUST_TOOLCHAIN:-nightly-2026-07-20}
 readonly bpf_linker_version=${BPF_LINKER_VERSION:-0.10.4}
 readonly bpf_linker_sha256=${BPF_LINKER_SHA256:-4dda77daab6c5f120a468e6d3ede2498f5bd47ece712172cfb7290176d93d015}
 readonly rust_feed_commit=${RUST_FEED_COMMIT:-2006dff59caa09bc3bc22ffdc84df2aa1c8d0c8a}

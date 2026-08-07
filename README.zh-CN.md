@@ -65,7 +65,7 @@ sudo apt-get install -y \
 源码构建在 OpenWrt SDK 容器内完成。SDK 辅助脚本会安装 Rustup、锁定的 BPF nightly 工具链、锁定的 Rust feed 提交，以及 `bpf-linker` `0.10.4`：
 
 ~~~sh
-rustup toolchain install nightly-2026-07-27 --profile minimal \
+rustup toolchain install nightly-2026-07-20 --profile minimal \
   --component rust-src
 ~~~
 

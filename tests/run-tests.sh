@@ -46,7 +46,7 @@ bash -n tests/test-dns-projection.sh
 bash -n tests/test-luci-v2-contract.sh
 bash -n tests/test-luci-package-isolation.sh
 bash -n tests/test-init-geo-contract.sh
-grep -F 'BPF_RUST_TOOLCHAIN?=nightly-2026-07-27' honk/Makefile >/dev/null
+grep -F 'BPF_RUST_TOOLCHAIN?=nightly-2026-07-20' honk/Makefile >/dev/null
 grep -F 'PKG_BUILD_DEPENDS:=rust/host' honk/Makefile >/dev/null
 grep -F 'PKG_SOURCE_URL:=https://github.com/Glassyiris/honk/archive' honk/source.mk >/dev/null
 grep -F 'cargo build --locked --release' honk/Makefile >/dev/null
@@ -62,7 +62,7 @@ fi
 grep -F 'option geosite_url' honk/files/honk.config >/dev/null
 grep -F 'option geoip_url' honk/files/honk.config >/dev/null
 grep -F 'option allow_custom_geo' honk/files/honk.config >/dev/null
-grep -F 'pub only: Option<String>' honk/patches/100-beta35-openwrt-contracts.patch >/dev/null
+grep -F 'pub only: Option<String>' honk/patches/100-beta40-openwrt-contracts.patch >/dev/null
 grep -F 'openwrt-24.10' .github/workflows/build-packages.yml >/dev/null
 grep -F 'openwrt-25.12' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: ipk' .github/workflows/build-packages.yml >/dev/null

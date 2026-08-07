@@ -1,18 +1,18 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 3188d30..efc72a1 100644
+index 75fc3eb..a50cf50 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -1656,6 +1656,8 @@ dependencies = [
-  "honk-ebpf-common",
+@@ -1657,6 +1657,8 @@ dependencies = [
   "honk-outbound",
   "libc",
+  "tempfile",
 + "serde_json",
 + "sha2 0.11.0",
   "tokio",
   "tracing",
   "tracing-subscriber",
 diff --git a/crates/honk-config/src/parser/mod.rs b/crates/honk-config/src/parser/mod.rs
-index 120f2d0..10d2c7c 100644
+index 0c2011c..8fbdda9 100644
 --- a/crates/honk-config/src/parser/mod.rs
 +++ b/crates/honk-config/src/parser/mod.rs
 @@ -400,7 +400,11 @@ pub fn parse_dae_config(input: &str) -> Result<Config, crate::ConfigError> {
@@ -78,7 +78,7 @@ index 120f2d0..10d2c7c 100644
              let re = parse_name_filter(filter);
              let Some(re) = re else { continue };
              for node in nodes {
-@@ -1438,7 +1469,13 @@ fn parse_group_policy(policy: &str) -> crate::group::GroupPolicy {
+@@ -1456,7 +1487,13 @@ fn parse_group_policy(policy: &str) -> crate::group::GroupPolicy {
  
  fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, crate::ConfigError> {
      let mut subs = Vec::new();
@@ -93,7 +93,7 @@ index 120f2d0..10d2c7c 100644
          let trimmed = line.trim();
          if trimmed.is_empty() || trimmed.starts_with('#') {
              continue;
-@@ -1460,6 +1497,25 @@ fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, cr
+@@ -1478,6 +1515,25 @@ fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, cr
              });
          }
      }
@@ -120,10 +120,10 @@ index 120f2d0..10d2c7c 100644
  }
  
 diff --git a/crates/honk-config/src/parser/tests.rs b/crates/honk-config/src/parser/tests.rs
-index 62581ce..68a37d3 100644
+index 46c9fe5..c14effe 100644
 --- a/crates/honk-config/src/parser/tests.rs
 +++ b/crates/honk-config/src/parser/tests.rs
-@@ -319,6 +319,42 @@ subscription {
+@@ -334,6 +334,42 @@ subscription {
          assert_eq!(config.subscriptions.len(), 2);
      }
  
@@ -167,19 +167,23 @@ index 62581ce..68a37d3 100644
      fn test_parse_full_global() {
          let input = r#"
 diff --git a/crates/honk-config/src/share_link.rs b/crates/honk-config/src/share_link.rs
-index c21c01d..254db5d 100644
+index c21c01d..886d302 100644
 --- a/crates/honk-config/src/share_link.rs
 +++ b/crates/honk-config/src/share_link.rs
-@@ -103,7 +103,7 @@ impl Node {
+@@ -103,8 +103,10 @@ impl Node {
              // URI userinfo field, not the password field.  Copy it to
              // `password` so the protocol handler can build the correct request
              // header.
 -            if matches!(protocol, NodeProtocol::Trojan | NodeProtocol::AnyTLS)
-+            if matches!(protocol, NodeProtocol::Trojan | NodeProtocol::VLess | NodeProtocol::AnyTLS)
-                 && node.password.is_none()
+-                && node.password.is_none()
++            if matches!(
++                protocol,
++                NodeProtocol::Trojan | NodeProtocol::VLess | NodeProtocol::AnyTLS
++            ) && node.password.is_none()
                  && !url.username().is_empty()
              {
-@@ -144,7 +144,7 @@ impl Node {
+                 node.password = Some(percent_decode_str(url.username()));
+@@ -144,7 +146,7 @@ impl Node {
          // Trojan transport options.  `alpn` is accepted for
          // compatibility but intentionally not stored.
          let mut host_consumed = false;
@@ -188,7 +192,7 @@ index c21c01d..254db5d 100644
              match node.transport.as_str() {
                  "ws" => {
                      if let Some(v) = query.get("host") {
-@@ -152,7 +152,7 @@ impl Node {
+@@ -152,7 +154,7 @@ impl Node {
                          host_consumed = true;
                      }
                      if let Some(v) = query.get("path") {
@@ -197,7 +201,7 @@ index c21c01d..254db5d 100644
                      }
                  }
                  "grpc" => {
-@@ -196,8 +196,8 @@ impl Node {
+@@ -196,8 +198,8 @@ impl Node {
          if let Some(v) = query.get("ech_config").or_else(|| query.get("echconfig")) {
              node.ech_enabled = true;
              node.ech_config = Some(v.clone());
@@ -208,7 +212,7 @@ index c21c01d..254db5d 100644
          }
  
          if let Some(v) = query.get("plugin") {
-@@ -325,6 +325,21 @@ impl Node {
+@@ -325,6 +327,21 @@ impl Node {
      }
  }
  
@@ -246,18 +250,18 @@ index db1d316..1930f1a 100644
      #[serde(default = "Utc::now")]
      pub created_at: DateTime<Utc>,
 diff --git a/crates/honk-core/src/clash_api.rs b/crates/honk-core/src/clash_api.rs
-index 9c14423..c6015e9 100644
+index b728ea8..16e103d 100644
 --- a/crates/honk-core/src/clash_api.rs
 +++ b/crates/honk-core/src/clash_api.rs
 @@ -35,6 +35,7 @@ use honk_outbound::group::{GroupManager, SharedGroupManager};
  use honk_outbound::urltest::{urltest_group, urltest_node};
- use std::sync::Arc;
+ use std::sync::{Arc, Weak};
  use std::time::Duration;
 +use tokio::sync::mpsc;
  
  const STREAM_CHANNEL_CAPACITY: usize = 16;
- 
-@@ -93,6 +94,8 @@ pub struct ClashState {
+ const CONNECTION_INTERVAL_BUCKETS_MS: [u64; 9] =
+@@ -110,6 +111,8 @@ pub struct ClashState {
      pub dns_service: crate::dns::DnsService,
      /// Shared lazy samplers for high-fanout websocket/HTTP streams.
      pub stream_samplers: Arc<StreamSamplers>,
@@ -266,15 +270,7 @@ index 9c14423..c6015e9 100644
  }
  
  pub fn router(state: Arc<ClashState>) -> Router {
-@@ -113,6 +116,7 @@ pub fn router(state: Arc<ClashState>) -> Router {
-             get(get_connections).delete(delete_connections),
-         )
-         .route("/connections/{id}", delete(delete_connection))
-+        .route("/memory", get(get_memory))
-         .route("/traffic", get(get_traffic))
-         .route("/stats", get(get_outbound_stats))
-         .route("/logs", get(get_logs))
-@@ -121,6 +125,8 @@ pub fn router(state: Arc<ClashState>) -> Router {
+@@ -139,6 +142,8 @@ pub fn router(state: Arc<ClashState>) -> Router {
          .route("/cache/dns/flush", post(flush_dns))
          .route("/providers/proxies", get(get_proxy_providers))
          .route("/providers/rules", get(get_rule_providers))
@@ -283,7 +279,7 @@ index 9c14423..c6015e9 100644
          .route_layer(middleware::from_fn_with_state(
              state.clone(),
              auth_middleware,
-@@ -156,6 +162,90 @@ pub fn router(state: Arc<ClashState>) -> Router {
+@@ -182,6 +187,92 @@ pub fn router(state: Arc<ClashState>) -> Router {
          .with_state(state)
  }
  
@@ -362,7 +358,9 @@ index 9c14423..c6015e9 100644
 +                    .send(crate::control::ControlCommand::SubscriptionError {
 +                        subscription_id: subscription.id,
 +                        name: subscription.name,
-+                        error: error.to_string().replace(&subscription.url, "<subscription>"),
++                        error: error
++                            .to_string()
++                            .replace(&subscription.url, "<subscription>"),
 +                    })
 +                    .await;
 +            }
@@ -374,67 +372,11 @@ index 9c14423..c6015e9 100644
  pub async fn serve(state: Arc<ClashState>, listen: std::net::SocketAddr) {
      let app = router(state);
      let listener = match tokio::net::TcpListener::bind(listen).await {
-@@ -1122,6 +1212,55 @@ async fn delete_connection(State(s): State<Arc<ClashState>>, Path(id): Path<Stri
-     StatusCode::NO_CONTENT
- }
- 
-+/// Current resident set size in bytes, matching Mihomo's `/memory` payload.
-+fn process_rss_bytes() -> u64 {
-+    std::fs::read_to_string("/proc/self/status")
-+        .ok()
-+        .and_then(|status| {
-+            status
-+                .lines()
-+                .find(|line| line.starts_with("VmRSS:"))
-+                .and_then(|line| line.split_whitespace().nth(1))
-+                .and_then(|value| value.parse::<u64>().ok())
-+        })
-+        .unwrap_or(0)
-+        .saturating_mul(1024)
-+}
-+
-+fn memory_json() -> serde_json::Value {
-+    serde_json::json!({"inuse": process_rss_bytes()})
-+}
-+
-+async fn get_memory(ws: MaybeWs) -> Response {
-+    let Some(ws) = ws.0 else {
-+        return chunked_json_response(memory_chunk_stream());
-+    };
-+    ws.on_upgrade(memory_ws)
-+}
-+
-+async fn memory_ws(mut socket: WebSocket) {
-+    let mut tick = tokio::time::interval(Duration::from_secs(1));
-+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-+    loop {
-+        tick.tick().await;
-+        if socket
-+            .send(Message::Text(memory_json().to_string().into()))
-+            .await
-+            .is_err()
-+        {
-+            break;
-+        }
-+    }
-+}
-+
-+fn memory_chunk_stream(
-+) -> impl futures::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
-+    futures::stream::unfold((), |_| async move {
-+        tokio::time::sleep(Duration::from_secs(1)).await;
-+        Some((Ok(Bytes::from(format!("{}\n", memory_json()))), ()))
-+    })
-+}
-+
- async fn traffic_totals(s: &ClashState) -> (u64, u64) {
-     traffic_totals_stats(&s.stats)
- }
 diff --git a/crates/honk-core/src/control/connection.rs b/crates/honk-core/src/control/connection.rs
-index 088c715..6de0d48 100644
+index 75ca99a..4d1536f 100644
 --- a/crates/honk-core/src/control/connection.rs
 +++ b/crates/honk-core/src/control/connection.rs
-@@ -198,14 +198,13 @@ impl ControlPlaneHandle {
+@@ -248,14 +248,13 @@ impl ControlPlaneHandle {
          }
      }
  
@@ -454,7 +396,7 @@ index 088c715..6de0d48 100644
      /// - `block` results and `must` results (dae `(must)` rules / eBPF
      ///   handoff must flag) are never overridden — both are final routing
      ///   decisions that mode switches must not bypass.
-@@ -217,10 +216,10 @@ impl ControlPlaneHandle {
+@@ -267,10 +266,10 @@ impl ControlPlaneHandle {
              return outbound_name;
          }
          let state = { mode_state.read().clone() };
@@ -468,7 +410,7 @@ index 088c715..6de0d48 100644
              let selection = &state.global_selection;
              selection_resolvable = *selection == "direct" || *selection == "block" || {
                  let config = self.config.read().await;
-@@ -229,7 +228,7 @@ impl ControlPlaneHandle {
+@@ -279,7 +278,7 @@ impl ControlPlaneHandle {
              };
              if !selection_resolvable {
                  debug!(
@@ -477,7 +419,7 @@ index 088c715..6de0d48 100644
                      selection, outbound_name
                  );
              }
-@@ -427,9 +426,8 @@ impl ControlPlaneHandle {
+@@ -477,9 +476,8 @@ impl ControlPlaneHandle {
                  .map(|m| (m.rule_type.to_string(), m.rule_payload.to_string()))
          };
  
@@ -490,10 +432,10 @@ index 088c715..6de0d48 100644
  
          // For userspace-routed flows with a sniffed domain, write the resolved
 diff --git a/crates/honk-core/src/control/mod.rs b/crates/honk-core/src/control/mod.rs
-index 32a3ee9..d66820f 100644
+index 33033c9..20fcf03 100644
 --- a/crates/honk-core/src/control/mod.rs
 +++ b/crates/honk-core/src/control/mod.rs
-@@ -74,6 +74,13 @@ pub mod commands {
+@@ -81,6 +81,13 @@ pub mod commands {
              name: String,
              nodes: Vec<Node>,
          },
@@ -507,7 +449,7 @@ index 32a3ee9..d66820f 100644
          Shutdown,
          GetStats(mpsc::Sender<super::StatsSnapshot>),
      }
-@@ -339,7 +346,21 @@ impl ControlPlane {
+@@ -464,7 +471,21 @@ impl ControlPlane {
                      hook
                  };
              alive_set.set_resolver(make_hook(controller.clone()));
@@ -530,7 +472,7 @@ index 32a3ee9..d66820f 100644
          }
  
          let control_plane = Self {
-@@ -1188,6 +1209,18 @@ impl ControlPlane {
+@@ -1310,6 +1331,18 @@ impl ControlPlane {
                              // both commands queue on this single channel.
                              let _ = self.apply_runtime_config(new_config, &drain).await;
                          }
@@ -550,10 +492,10 @@ index 32a3ee9..d66820f 100644
                              let snap = self.stats.snapshot();
                              let total = snap.values().map(|s| s.total_conns as u64).sum();
 diff --git a/crates/honk-core/src/control/reload.rs b/crates/honk-core/src/control/reload.rs
-index b2251d3..9667158 100644
+index 4b6d704..257ab23 100644
 --- a/crates/honk-core/src/control/reload.rs
 +++ b/crates/honk-core/src/control/reload.rs
-@@ -723,6 +723,20 @@ pub(super) fn config_with_subscription_nodes(
+@@ -745,6 +745,20 @@ pub(super) fn config_with_subscription_nodes(
          .nodes
          .retain(|n| n.subscription_id != Some(subscription_id));
      config.nodes.extend(nodes);
@@ -574,7 +516,7 @@ index b2251d3..9667158 100644
      // Group membership is filter-derived state: drop dangling IDs left
      // behind by replaced subscription nodes (refreshed parses mint fresh
      // UUIDs), then re-resolve filters against the merged node set.
-@@ -730,7 +744,11 @@ pub(super) fn config_with_subscription_nodes(
+@@ -752,7 +766,11 @@ pub(super) fn config_with_subscription_nodes(
      for group in &mut config.groups {
          group.nodes.retain(|id| live.contains(id));
      }
@@ -588,10 +530,10 @@ index b2251d3..9667158 100644
  }
  
 diff --git a/crates/honk-core/src/ebpf/real/attach.rs b/crates/honk-core/src/ebpf/real/attach.rs
-index 7f89891..9016a40 100644
+index 5949624..90adb09 100644
 --- a/crates/honk-core/src/ebpf/real/attach.rs
 +++ b/crates/honk-core/src/ebpf/real/attach.rs
-@@ -399,21 +399,28 @@ impl RealEbpfBackend {
+@@ -433,21 +433,28 @@ impl RealEbpfBackend {
                      slave_prog, slave
                  );
  
@@ -636,12 +578,12 @@ index 7f89891..9016a40 100644
          }
  
 diff --git a/crates/honk-core/src/ebpf/real/iface_watch.rs b/crates/honk-core/src/ebpf/real/iface_watch.rs
-index 98733c7..588c422 100644
+index 93c2d87..568538f 100644
 --- a/crates/honk-core/src/ebpf/real/iface_watch.rs
 +++ b/crates/honk-core/src/ebpf/real/iface_watch.rs
-@@ -185,10 +185,14 @@ async fn reconcile(
-             ingress: true,
-             egress: !single_homed,
+@@ -196,10 +196,14 @@ async fn reconcile(
+             ingress: false,
+             egress: true,
          },
 -        _ => DynamicHooks {
 +        IfaceRole::Wan | IfaceRole::LanBondSlave => DynamicHooks {
@@ -656,10 +598,10 @@ index 98733c7..588c422 100644
      let mut backend = ebpf.write().await;
      // Forget tracked entries that vanished, were recreated (their hooks
 diff --git a/crates/honk-core/src/lib.rs b/crates/honk-core/src/lib.rs
-index 898f61f..e923d03 100644
+index 71bc7cb..7b47e82 100644
 --- a/crates/honk-core/src/lib.rs
 +++ b/crates/honk-core/src/lib.rs
-@@ -391,10 +391,27 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+@@ -430,10 +430,27 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
                      match result {
                          Some((sub, Ok(nodes))) => {
                              info!("Subscription '{}' fetched {} nodes", sub.name, nodes.len());
@@ -687,7 +629,7 @@ index 898f61f..e923d03 100644
                          }
                          None => break,
                      }
-@@ -429,7 +446,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+@@ -468,7 +485,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
      // defined with `filter:` (or with no filter at all, meaning "all nodes")
      // would otherwise end up with an empty member list for static configs.
      // The merge is idempotent (existing IDs are kept, no duplicates).
@@ -700,15 +642,15 @@ index 898f61f..e923d03 100644
      for group in &config.groups {
          info!(
              "Group '{}' resolved {} node(s)",
-@@ -851,6 +872,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
-                         log_tx: clash_log_tx.clone(),
+@@ -871,6 +892,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+                         log_handle: clash_log_handle.clone(),
                          dns_service: control_plane.dns_service(),
                          stream_samplers,
 +                        command_tx: control_plane.command_sender(),
                      });
                      tokio::spawn(clash_api::serve(state, listen));
                  }
-@@ -904,6 +926,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+@@ -924,6 +946,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
                      }
                      Err(e) => {
                          warn!("Background subscription '{}' fetch failed: {}", sub.name, e);
@@ -722,7 +664,7 @@ index 898f61f..e923d03 100644
                      }
                  }
              }
-@@ -947,6 +976,17 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+@@ -967,6 +996,17 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
                                  "Subscription '{}' refresh failed; keeping existing nodes: {}",
                                  sub.name, e
                              );
@@ -740,7 +682,7 @@ index 898f61f..e923d03 100644
                          }
                      }
                  }
-@@ -1021,9 +1061,10 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+@@ -1041,9 +1081,10 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
                      // Resolve group filters into concrete node IDs, same as
                      // startup — otherwise filter-based groups keep stale
                      // (or empty) member lists in the rebuilt GroupManager.
@@ -752,7 +694,7 @@ index 898f61f..e923d03 100644
                      );
                      if let Err(e) = reload_tx
                          .send(control::ControlCommand::ReloadConfig {
-@@ -1061,10 +1102,19 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+@@ -1081,10 +1122,19 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
                                              })
                                              .await;
                                      }
@@ -777,7 +719,7 @@ index 898f61f..e923d03 100644
                              }
                          });
 diff --git a/crates/honk-core/src/mode.rs b/crates/honk-core/src/mode.rs
-index 5a270c2..c8e69b3 100644
+index 3eaa960..e0c7aed 100644
 --- a/crates/honk-core/src/mode.rs
 +++ b/crates/honk-core/src/mode.rs
 @@ -1,7 +1,8 @@
@@ -799,7 +741,7 @@ index 5a270c2..c8e69b3 100644
      /// `"Proxy"` entry dashboards send for the default selection.
      pub global_selection: String,
  }
-@@ -62,10 +63,11 @@ impl ModeState {
+@@ -83,10 +84,11 @@ impl ModeState {
      ///   must rule is an explicit force, neither of which a mode switch
      ///   may bypass;
      /// - mode `Direct` forces `direct`;
@@ -813,7 +755,7 @@ index 5a270c2..c8e69b3 100644
      pub fn override_outbound(
          &self,
          outbound_name: &str,
-@@ -81,6 +83,9 @@ impl ModeState {
+@@ -102,6 +104,9 @@ impl ModeState {
          if self.is_global() && !self.global_selection.is_empty() && selection_resolvable {
              return self.global_selection.clone();
          }
@@ -823,7 +765,7 @@ index 5a270c2..c8e69b3 100644
          outbound_name.to_string()
      }
  }
-@@ -107,10 +112,14 @@ mod tests {
+@@ -147,10 +152,14 @@ mod tests {
      }
  
      #[test]
@@ -894,10 +836,10 @@ index cd80476..3b90a72 100644
  fn parse_node_uri(uri: &str) -> anyhow::Result<Node> {
      Node::from_share_link(uri).map_err(anyhow::Error::new)
 diff --git a/crates/honk-core/tests/clash_api_test.rs b/crates/honk-core/tests/clash_api_test.rs
-index b60084b..a2b6b33 100644
+index 455a10a..bf22336 100644
 --- a/crates/honk-core/tests/clash_api_test.rs
 +++ b/crates/honk-core/tests/clash_api_test.rs
-@@ -146,6 +146,7 @@ async fn spawn_app_with_config(config: Config, secret: &str, external_ui: &str)
+@@ -151,6 +151,7 @@ async fn spawn_app_with_config(config: Config, secret: &str, external_ui: &str)
      )));
      let stats = Arc::new(StatsManager::new());
      let connection_tracker = Arc::new(ConnectionTracker::new());
@@ -905,7 +847,7 @@ index b60084b..a2b6b33 100644
      let runtime_registry = honk_outbound::runtime::OutboundRuntimeRegistry::build(&config.nodes)
          .unwrap()
          .into_shared();
-@@ -165,6 +166,7 @@ async fn spawn_app_with_config(config: Config, secret: &str, external_ui: &str)
+@@ -181,6 +182,7 @@ async fn spawn_app_with_config(config: Config, secret: &str, external_ui: &str)
          dns_service,
          connection_pool: Arc::new(honk_core::pool::ConnectionPool::new()),
          stream_samplers: Arc::new(clash_api::StreamSamplers::new()),
@@ -913,7 +855,7 @@ index b60084b..a2b6b33 100644
      });
  
      let app = clash_api::router(state.clone());
-@@ -1100,6 +1102,7 @@ async fn test_dns_query_upstream_and_nxdomain() {
+@@ -1210,6 +1212,7 @@ async fn test_dns_query_upstream_and_nxdomain() {
          dns_service: nx_service,
          connection_pool: app.state.connection_pool.clone(),
          stream_samplers: app.state.stream_samplers.clone(),
@@ -922,7 +864,7 @@ index b60084b..a2b6b33 100644
      let nx_app = clash_api::router(state);
      let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
 diff --git a/crates/honk-ebpf/.cargo/config.toml b/crates/honk-ebpf/.cargo/config.toml
-index 76cbb41..4254b86 100644
+index 629aa72..729945c 100644
 --- a/crates/honk-ebpf/.cargo/config.toml
 +++ b/crates/honk-ebpf/.cargo/config.toml
 @@ -5,7 +5,7 @@ rustflags = [
@@ -935,7 +877,7 @@ index 76cbb41..4254b86 100644
    "debuginfo=2",
    "-C",
 diff --git a/crates/honk-outbound/src/proxy/transport.rs b/crates/honk-outbound/src/proxy/transport.rs
-index 9ee8cbd..93a5b3f 100644
+index 9ee8cbd..cfe14a2 100644
 --- a/crates/honk-outbound/src/proxy/transport.rs
 +++ b/crates/honk-outbound/src/proxy/transport.rs
 @@ -31,10 +31,18 @@ use super::AsyncReadWrite;
@@ -979,7 +921,7 @@ index 9ee8cbd..93a5b3f 100644
          "grpc" => wrap_grpc(node, stream).await,
          // Unknown transport must not silently degrade to raw TCP — a
          // mistyped transport means a different protocol than intended.
-@@ -58,6 +74,21 @@ pub(crate) async fn wrap_transport(
+@@ -58,6 +74,26 @@ pub(crate) async fn wrap_transport(
      }
  }
  
@@ -987,11 +929,16 @@ index 9ee8cbd..93a5b3f 100644
 +    if node.transport != "ws" || data.is_empty() {
 +        return false;
 +    }
-+    let Some((_, query)) = node.ws_path.as_deref().and_then(|path| path.split_once('?')) else {
++    let Some((_, query)) = node
++        .ws_path
++        .as_deref()
++        .and_then(|path| path.split_once('?'))
++    else {
 +        return false;
 +    };
 +    let Some(limit) = query.split('&').find_map(|part| {
-+        part.strip_prefix("ed=").and_then(|value| value.parse::<usize>().ok())
++        part.strip_prefix("ed=")
++            .and_then(|value| value.parse::<usize>().ok())
 +    }) else {
 +        return false;
 +    };
@@ -1001,7 +948,7 @@ index 9ee8cbd..93a5b3f 100644
  /// Wrap the stream in TLS when `node.tls` is set, using `node.sni` (or the
  /// server host) as the SNI.
  pub(crate) async fn maybe_tls_wrap(
-@@ -80,12 +111,18 @@ pub(crate) async fn maybe_tls_wrap(
+@@ -80,12 +116,18 @@ pub(crate) async fn maybe_tls_wrap(
  async fn wrap_ws(
      node: &Node,
      stream: Box<dyn AsyncReadWrite>,
@@ -1020,7 +967,7 @@ index 9ee8cbd..93a5b3f 100644
      // Build the request from the URI so tungstenite generates the full
      // handshake header set (Sec-WebSocket-Key, Upgrade, ...); a bare
      // `http::Request` passed to `client_async` is sent as-is and real
-@@ -104,6 +141,7 @@ async fn wrap_ws(
+@@ -104,6 +146,7 @@ async fn wrap_ws(
      let (ws_stream, _response) = tokio_tungstenite::client_async(request, stream)
          .await
          .map_err(|e| anyhow::anyhow!("WebSocket upgrade failed: {}", e))?;
@@ -1028,7 +975,7 @@ index 9ee8cbd..93a5b3f 100644
  
      let (client_half, server_half) = tokio::io::duplex(65536);
  
-@@ -112,6 +150,67 @@ async fn wrap_ws(
+@@ -112,6 +155,71 @@ async fn wrap_ws(
      Ok(Box::new(client_half))
  }
  
@@ -1068,11 +1015,15 @@ index 9ee8cbd..93a5b3f 100644
 +        .next()
 +        .is_some_and(|line| line.starts_with("HTTP/1.1 101 ") || line.starts_with("HTTP/2 101 "));
 +    if !status_ok {
-+        anyhow::bail!("WebSocket upgrade failed: {}", response_text.lines().next().unwrap_or(""));
++        anyhow::bail!(
++            "WebSocket upgrade failed: {}",
++            response_text.lines().next().unwrap_or("")
++        );
 +    }
-+    let accept = response_text.lines().skip(1).find_map(|line| {
-+        line.strip_prefix("Sec-WebSocket-Accept:").map(str::trim)
-+    });
++    let accept = response_text
++        .lines()
++        .skip(1)
++        .find_map(|line| line.strip_prefix("Sec-WebSocket-Accept:").map(str::trim));
 +    let mut digest = sha1::Sha1::new();
 +    digest.update(key.as_bytes());
 +    digest.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
@@ -1096,7 +1047,7 @@ index 9ee8cbd..93a5b3f 100644
  /// Background task that bridges a WebSocket stream to a duplex half.
  /// Reads binary/text messages from the WebSocket and writes them to
  /// the duplex; reads from the duplex and sends as binary WebSocket
-@@ -126,6 +225,7 @@ async fn ws_bridge_relay(
+@@ -126,6 +234,7 @@ async fn ws_bridge_relay(
      // server → ws
      let s2w = async {
          let mut buf = vec![0u8; 65536];
@@ -1104,18 +1055,22 @@ index 9ee8cbd..93a5b3f 100644
          loop {
              use tokio::io::AsyncReadExt;
              let n = server_read
-@@ -135,6 +235,10 @@ async fn ws_bridge_relay(
+@@ -135,6 +244,14 @@ async fn ws_bridge_relay(
              if n == 0 {
                  break;
              }
 +            if first_frame {
-+                tracing::debug!(direction = "client-to-upstream", bytes = n, "WebSocket first frame sent");
++                tracing::debug!(
++                    direction = "client-to-upstream",
++                    bytes = n,
++                    "WebSocket first frame sent"
++                );
 +                first_frame = false;
 +            }
              ws_sink
                  .send(tokio_tungstenite::tungstenite::Message::Binary(
                      buf[..n].to_vec().into(),
-@@ -148,15 +252,24 @@ async fn ws_bridge_relay(
+@@ -148,15 +265,32 @@ async fn ws_bridge_relay(
  
      // ws → server
      let w2s = async {
@@ -1126,7 +1081,11 @@ index 9ee8cbd..93a5b3f 100644
                  Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(data))) => {
                      use tokio::io::AsyncWriteExt;
 +                    if first_frame {
-+                        tracing::debug!(direction = "upstream-to-client", bytes = data.len(), "WebSocket first payload received");
++                        tracing::debug!(
++                            direction = "upstream-to-client",
++                            bytes = data.len(),
++                            "WebSocket first payload received"
++                        );
 +                        first_frame = false;
 +                    }
                      server_write.write_all(&data).await?;
@@ -1134,7 +1093,11 @@ index 9ee8cbd..93a5b3f 100644
                  Some(Ok(tokio_tungstenite::tungstenite::Message::Text(data))) => {
                      use tokio::io::AsyncWriteExt;
 +                    if first_frame {
-+                        tracing::debug!(direction = "upstream-to-client", bytes = data.len(), "WebSocket first text payload received");
++                        tracing::debug!(
++                            direction = "upstream-to-client",
++                            bytes = data.len(),
++                            "WebSocket first text payload received"
++                        );
 +                        first_frame = false;
 +                    }
                      server_write.write_all(data.as_bytes()).await?;
@@ -1307,17 +1270,20 @@ index 64fd024..645eebe 100644
  
      Ok(TlsConnector {
 diff --git a/crates/honk-tool/Cargo.toml b/crates/honk-tool/Cargo.toml
-index 36c4cdf..1a1dc1a 100644
+index 8a1bd97..dea13b0 100644
 --- a/crates/honk-tool/Cargo.toml
 +++ b/crates/honk-tool/Cargo.toml
-@@ -20,3 +20,5 @@ libc.workspace = true
+@@ -20,6 +20,8 @@ libc.workspace = true
  tokio.workspace = true
  tracing.workspace = true
  tracing-subscriber.workspace = true
 +serde_json.workspace = true
 +sha2.workspace = true
+ 
+ [dev-dependencies]
+ tempfile.workspace = true
 diff --git a/crates/honk-tool/src/bpf.rs b/crates/honk-tool/src/bpf.rs
-index 77e8a14..135ecd9 100644
+index 77e8a14..ef7f67e 100644
 --- a/crates/honk-tool/src/bpf.rs
 +++ b/crates/honk-tool/src/bpf.rs
 @@ -180,18 +180,31 @@ fn sum_percpu_outbound(buf: &[u8]) -> OutboundStatsCounters {
@@ -1429,7 +1395,7 @@ index 77e8a14..135ecd9 100644
      for outbound in 0..OUTBOUND_STATS_MAP_LEN {
          let counters = read_percpu_outbound(fd, ncpu, outbound)?;
          if counters.tx_packets != 0
-@@ -426,12 +461,50 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
+@@ -426,12 +461,60 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
              || counters.rx_packets != 0
              || counters.rx_bytes != 0
          {
@@ -1441,8 +1407,18 @@ index 77e8a14..135ecd9 100644
 +                let (tx_rate, rx_rate) = if args.sample_ms > 0 {
 +                    let previous = before[outbound as usize];
 +                    (
-+                        counters.tx_bytes.saturating_sub(previous.tx_bytes).saturating_mul(1000).checked_div(args.sample_ms).unwrap_or(0),
-+                        counters.rx_bytes.saturating_sub(previous.rx_bytes).saturating_mul(1000).checked_div(args.sample_ms).unwrap_or(0),
++                        counters
++                            .tx_bytes
++                            .saturating_sub(previous.tx_bytes)
++                            .saturating_mul(1000)
++                            .checked_div(args.sample_ms)
++                            .unwrap_or(0),
++                        counters
++                            .rx_bytes
++                            .saturating_sub(previous.rx_bytes)
++                            .saturating_mul(1000)
++                            .checked_div(args.sample_ms)
++                            .unwrap_or(0),
 +                    )
 +                } else {
 +                    (0, 0)
@@ -1498,18 +1474,20 @@ index 99b5098..5540426 100644
          Ok(()) => {}
          Err(e) => {
 diff --git a/crates/honk-tool/src/geo.rs b/crates/honk-tool/src/geo.rs
-new file mode 100644
-index 0000000..afe45a1
---- /dev/null
+index f4beceb..87b4022 100644
+--- a/crates/honk-tool/src/geo.rs
 +++ b/crates/honk-tool/src/geo.rs
-@@ -0,0 +1,437 @@
+@@ -200,3 +200,447 @@ fn render_geoip_lookup(scan: &GeoipScan, ip: IpAddr) -> String {
+     }
+     out
+ }
++
 +use anyhow::{Context, Result};
-+use clap::{Args, Subcommand};
 +use serde_json::{Value, json};
 +use sha2::{Digest, Sha256};
 +use std::fs;
 +use std::io;
-+use std::path::{Path, PathBuf};
++use std::path::Path;
 +
 +const LOCK_SITE_SHA: &str = "1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f";
 +const LOCK_IP_SHA: &str = "b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a";
@@ -1734,23 +1712,29 @@ index 0000000..afe45a1
 +    let all_geoip = geoip_labels
 +        .iter()
 +        .all(|v| v.get("present").and_then(Value::as_bool).unwrap_or(false));
-+    let combined_disk_status = if check_site && disk_status != "LOYALSOLDIER_LOCKED" && disk_status != "CUSTOM" {
-+        disk_status
-+    } else if check_ip && ip_status != "V2FLY_LOCKED" && ip_status != "CUSTOM" {
-+        if ip_status == "V2FLY_GFW_UNSUPPORTED" {
-+            "V2FLY_GFW_UNSUPPORTED"
++    let combined_disk_status =
++        if check_site && disk_status != "LOYALSOLDIER_LOCKED" && disk_status != "CUSTOM" {
++            disk_status
++        } else if check_ip && ip_status != "V2FLY_LOCKED" && ip_status != "CUSTOM" {
++            if ip_status == "V2FLY_GFW_UNSUPPORTED" {
++                "V2FLY_GFW_UNSUPPORTED"
++            } else {
++                "TAMPERED"
++            }
 +        } else {
-+            "TAMPERED"
-+        }
-+    } else {
-+        if disk_status == "CUSTOM" || ip_status == "CUSTOM" { "CUSTOM" } else { "LOYALSOLDIER_LOCKED" }
-+    };
++            if disk_status == "CUSTOM" || ip_status == "CUSTOM" {
++                "CUSTOM"
++            } else {
++                "LOYALSOLDIER_LOCKED"
++            }
++        };
 +    let active = live_status(&site_sha, &ip_sha);
 +    let active_status = active
 +        .get("status")
 +        .and_then(Value::as_str)
 +        .unwrap_or("STALE");
-+    let site_ok = !check_site || ((disk_status == "LOYALSOLDIER_LOCKED" || disk_status == "CUSTOM") && all_labels);
++    let site_ok = !check_site
++        || ((disk_status == "LOYALSOLDIER_LOCKED" || disk_status == "CUSTOM") && all_labels);
 +    let ip_ok = !check_ip || ((ip_status == "V2FLY_LOCKED" || ip_status == "CUSTOM") && all_geoip);
 +    let ok = (site_ok && ip_ok)
 +        || (args.labels.is_empty() && args.geoip_labels.is_empty() && args.only.is_some());
@@ -1803,7 +1787,8 @@ index 0000000..afe45a1
 +    std::os::unix::fs::symlink(payload, &temp)?;
 +    fs::rename(&temp, link)?;
 +    if let Some(parent) = link.parent()
-+        && let Ok(dir) = fs::File::open(parent) {
++        && let Ok(dir) = fs::File::open(parent)
++    {
 +        let _ = dir.sync_all();
 +    }
 +    let output = json!({"ok":true,"repaired":true,"path":link.display().to_string(),"resolvedPath":resolved(link),"diskStatus":"LOYALSOLDIER_LOCKED","activeStatus":"STALE","needsRestart":true});
@@ -1941,23 +1926,29 @@ index 0000000..afe45a1
 +    }
 +}
 diff --git a/crates/honk-tool/src/main.rs b/crates/honk-tool/src/main.rs
-index c6f313e..57d2d34 100644
+index e3a6894..7eb22d8 100644
 --- a/crates/honk-tool/src/main.rs
 +++ b/crates/honk-tool/src/main.rs
-@@ -5,7 +5,9 @@
+@@ -2,12 +2,14 @@
+ //!
+ //! Currently implemented: `sub` (subscription availability check),
+ //! `bpf` (pinned-map quick reads), `diagnose` (one-shot health check),
+-//! `geosite` / `geoip` (dat file content search).
++//! `validate`, `geo` (Honk-owned Geo assets), and `geosite` / `geoip` (dat
++//! file content search).
  
  mod bpf;
  mod diagnose;
-+mod geo;
+ mod geo;
  mod sub;
 +mod validate;
  
  use clap::{Parser, Subcommand};
  
-@@ -25,6 +27,10 @@ enum Command {
-     Bpf(bpf::BpfArgs),
-     /// One-shot health check of a running honk engine.
-     Diagnose(diagnose::DiagnoseArgs),
+@@ -32,6 +34,10 @@ enum Command {
+     Geosite(geo::GeositeArgs),
+     /// Search geoip.dat: list codes, show CIDRs, longest-prefix IP lookup.
+     Geoip(geo::GeoipArgs),
 +    /// Parse and validate a Honk configuration without starting the engine.
 +    Validate(validate::ValidateArgs),
 +    /// Inspect and repair Honk-owned Geo assets.
@@ -1965,17 +1956,17 @@ index c6f313e..57d2d34 100644
  }
  
  #[tokio::main]
-@@ -40,5 +46,7 @@ async fn main() -> anyhow::Result<()> {
-         Command::Sub(args) => sub::run(args).await,
-         Command::Bpf(args) => bpf::run(args).await,
+@@ -49,5 +55,7 @@ async fn main() -> anyhow::Result<()> {
          Command::Diagnose(args) => diagnose::run(args).await,
+         Command::Geosite(args) => geo::run_geosite(args),
+         Command::Geoip(args) => geo::run_geoip(args),
 +        Command::Validate(args) => validate::run(args),
 +        Command::Geo(args) => geo::run(args),
      }
  }
 diff --git a/crates/honk-tool/src/validate.rs b/crates/honk-tool/src/validate.rs
 new file mode 100644
-index 0000000..9f0a567
+index 0000000..0d4ddf1
 --- /dev/null
 +++ b/crates/honk-tool/src/validate.rs
 @@ -0,0 +1,141 @@
@@ -2109,7 +2100,7 @@ index 0000000..9f0a567
 +            Ok(())
 +        }
 +        Err(error) => {
-+			let (diagnostic, exit_code) = diagnostic_code(&error);
++            let (diagnostic, exit_code) = diagnostic_code(&error);
 +            if args.json {
 +                println!(
 +                    "{}",
@@ -2121,10 +2112,10 @@ index 0000000..9f0a567
 +    }
 +}
 diff --git a/doc/configuration.en.md b/doc/configuration.en.md
-index 044e62d..a088555 100644
+index 412971a..e72e351 100644
 --- a/doc/configuration.en.md
 +++ b/doc/configuration.en.md
-@@ -226,6 +226,7 @@ Group-level knobs without a dae-syntax key keep their defaults: URLTest `toleran
+@@ -255,6 +255,7 @@ Group-level knobs without a dae-syntax key keep their defaults: URLTest `toleran
  | `name('exact')` | Exact name |
  | `name(keyword: 'pat')` | Substring |
  | `group('hk')` / `group('hk', 'jp')` | Nested groups |
@@ -2132,7 +2123,7 @@ index 044e62d..a088555 100644
  
  Rules of thumb:
  
-@@ -384,10 +385,20 @@ Upstream URIs take a scheme prefix: `udp://`, `tcp://`, `tcp+udp://`, `tls://`,
+@@ -413,10 +414,20 @@ Upstream URIs take a scheme prefix: `udp://`, `tcp://`, `tcp+udp://`, `tls://`,
  
  ```dae
  subscription {
@@ -2154,7 +2145,7 @@ index 044e62d..a088555 100644
  Each entry is `tag: 'url'` (a bare quoted URL is also accepted). In dae syntax the subscription type, update interval, and enabled flag keep their defaults (auto/simple, 86400 s, enabled).
  
  - Startup fetch races a short deadline; late results merge via the control-plane channel.
-@@ -409,6 +420,14 @@ experimental {
+@@ -438,6 +449,14 @@ experimental {
  }
  ```
  
@@ -2168,4 +2159,4 @@ index 044e62d..a088555 100644
 +
  Useful endpoints: `/proxies`, `/proxies/{name}` (PUT selector), `/proxies/{name}/delay`, `/group/{name}/delay`, `/connections`, `/traffic`, `/logs`, `/dns/query`, `/stats`.
  
- Env: `HONK_UI_DOWNLOAD_URL` overrides the default zashboard zip URL when `external_ui` is empty/missing.
+ Env: `HONK_UI_DOWNLOAD_URL` overrides the default zashboard zip URL when `external_ui` is empty/missing. The download follows the traffic routing decision (Router + group selection): `direct` fetches directly, `block` aborts it, any other outbound is dialed through the selected node.
