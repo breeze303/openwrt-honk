@@ -1,0 +1,33 @@
+diff --git a/crates/honk-core/src/lib.rs b/crates/honk-core/src/lib.rs
+--- a/crates/honk-core/src/lib.rs
++++ b/crates/honk-core/src/lib.rs
+@@ -1788,8 +1788,17 @@ fn registry_mount_exists(mounts: &str, path: &str) -> bool {
+ /// Whether `path`, or a child namespace handle, appears in /proc/mounts.
+ #[cfg(feature = "ebpf")]
+ fn is_mountpoint(path: &str) -> bool {
++    let canonical_path = std::fs::canonicalize(path)
++        .ok()
++        .and_then(|canonical_path| canonical_path.into_os_string().into_string().ok());
+     std::fs::read_to_string("/proc/mounts")
+-        .map(|mounts| registry_mount_exists(&mounts, path))
++        .map(|mounts| {
++            registry_mount_exists(&mounts, path)
++                || canonical_path
++                    .as_deref()
++                    .map(|canonical_path| registry_mount_exists(&mounts, canonical_path))
++                    .unwrap_or(false)
++        })
+         .unwrap_or(false)
+ }
+
+@@ -1803,4 +1811,10 @@ mod netns_registry_tests {
+         assert!(registry_mount_exists(mounts, "/run/netns"));
+         assert!(!registry_mount_exists(mounts, "/run/other-netns"));
+     }
++
++    #[test]
++    fn openwrt_realpath_registry_is_detected() {
++        let mounts = "nsfs /tmp/run/netns/hkcache-client nsfs rw 0 0\n";
++        assert!(registry_mount_exists(mounts, "/tmp/run/netns"));
++    }
+ }

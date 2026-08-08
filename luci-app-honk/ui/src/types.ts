@@ -7,12 +7,37 @@ export type SourceItem = {
   protocol: string
   enabled?: boolean
   updateInterval?: number
+  cacheSource?: 'cache' | 'stale' | 'missing'
+  cachedAt?: string
+  cachedNodeCount?: number
+  cachedError?: string
+  cachedErrorAt?: string
 }
 
 export type RuntimeNodeItem = {
   name: string
   subscription: string
   protocol: string
+  source?: 'runtime' | 'cache' | 'stale'
+}
+
+export type SubscriptionCacheRecord = {
+  name: string
+  nodeCount: number
+  nodes: RuntimeNodeItem[]
+  sha256?: string
+  updatedAt?: string
+  updatedEpoch?: number
+  lastError?: string
+  lastErrorAt?: string
+  stale?: boolean
+  source?: 'cache' | 'stale' | 'missing'
+}
+
+export type SubscriptionCacheResponse = {
+  ok: boolean
+  name: string
+  cache: SubscriptionCacheRecord
 }
 
 export type NodeDelay = {
@@ -68,7 +93,7 @@ export type StateResponse = {
   mode: ModeName | null
   managed: boolean
   requiresTakeover: boolean
-  catalog: { nodes: SourceItem[]; subscriptions: SourceItem[]; subscriptionNodes: RuntimeNodeItem[]; runtimeAvailable?: boolean; runtimeConfigured?: boolean }
+  catalog: { nodes: SourceItem[]; subscriptions: SourceItem[]; subscriptionNodes: RuntimeNodeItem[]; runtimeAvailable?: boolean; runtimeConfigured?: boolean; cacheAvailable?: boolean }
   selected: { nodes: string[]; subscriptions: string[] }
   deviceRules: DeviceRule[]
   last: LastState
@@ -165,6 +190,7 @@ export type GeoDiagnostics = {
 }
 
 export type DialMode = 'ip' | 'domain' | 'domain+' | 'domain++'
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error'
 
 export type NetworkAddress = {
   family: 'ipv4' | 'ipv6'

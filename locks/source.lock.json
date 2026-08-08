@@ -22,6 +22,30 @@
       {
         "path": "honk/patches/110-beta40-local-time.patch",
         "sha256": "bc291044c185d72c3a28bfe1cf17aa80d828f38a3c2838388ae049aafae4853c"
+      },
+      {
+        "path": "honk/patches/120-subscription-json-output.patch",
+        "sha256": "1e9933a4374f795a90a9dcb142d567dcc7dfdbdcd338f426b987fe8029a2bc29"
+      },
+      {
+        "path": "honk/patches/130-subscription-cache-fallback.patch",
+        "sha256": "a824043a78715e599f8db0819338256b72ecfd34e8af5b56781f4ce906914a9a"
+      },
+      {
+        "path": "honk/patches/140-subscription-cache-payload-parser.patch",
+        "sha256": "af7b3dec7ae8741e5bfb5e8c92391fb30cc67744b87cc64aeba12cb706f853ff"
+      },
+      {
+        "path": "honk/patches/150-dae-subscription-auto-parser.patch",
+        "sha256": "1ff96b64f3a15f52aca63f8f1ffd18dadd7fc147c6b956440f46dd49dcaf7b37"
+      },
+      {
+        "path": "honk/patches/160-preserve-existing-netns-registry.patch",
+        "sha256": "639df45ed12349ffae5006411391f38f8a3f992d3fa3bb27825acf49863a1ec3"
+      },
+      {
+        "path": "honk/patches/170-resolve-netns-registry-realpath.patch",
+        "sha256": "4f349ded336ef4f8372f32419decfe1467cd72d924738c388120a6dc7cac632b"
       }
     ],
     "provenance": {

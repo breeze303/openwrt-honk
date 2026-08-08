@@ -85,10 +85,14 @@ write_live_receipt() {
 }
 
 start_service() {
-	local respawn previous_pids
+	local respawn previous_pids SUBSCRIPTION_CACHE_TTL
 	config_load honk
 	config_get_bool respawn main respawn 1
 	config_get_bool ALLOW_CUSTOM_GEO main allow_custom_geo 0
+	config_get SUBSCRIPTION_CACHE_TTL main subscription_cache_ttl 604800
+	case "$SUBSCRIPTION_CACHE_TTL" in
+		''|*[!0-9]*) SUBSCRIPTION_CACHE_TTL=604800 ;;
+	esac
 	previous_pids="$(pidof honk-core 2>/dev/null || true)"
 	mkdir -p "$RUN_DIR" || return 1
 	if [ -x /usr/libexec/honk/quick-transaction-worker ]; then
@@ -127,7 +131,12 @@ start_service() {
 
 	procd_open_instance "$NAME"
 	procd_set_param command "$LAUNCHER" --config "$CONFIG" --bpf-pin-root "$PIN_ROOT"
-	procd_set_param env DAE_LOCATION_ASSET="$ASSET_DIR"
+	# procd accepts one environment table per instance. Keep the variables in
+	# one call so a later value does not overwrite the preceding table.
+	procd_set_param env \
+		"DAE_LOCATION_ASSET=$ASSET_DIR" \
+		"HONK_SUBSCRIPTION_CACHE_DIR=/etc/honk/subscriptions" \
+		"HONK_SUBSCRIPTION_CACHE_TTL=$SUBSCRIPTION_CACHE_TTL"
 	[ "$respawn" -eq 1 ] && procd_set_param respawn 3600 5 5
 	procd_set_param limits nofile="65536 65536"
 	procd_close_instance

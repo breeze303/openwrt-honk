@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Activity, FileCode2, Gauge, Home, Languages, Menu, Network, Power, RefreshCw, RotateCcw, ScrollText, Server, X } from '@lucide/vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Activity, FileCode2, Gauge, Home, Languages, Menu, Moon, Network, Power, RefreshCw, RotateCcw, Save, ScrollText, Server, Sun, X } from '@lucide/vue'
 import { api } from './api'
 import { locale, t } from './i18n'
+import type { PageAction } from './page-actions'
 import type { StateResponse } from './types'
 import AdvancedView from './views/AdvancedView.vue'
 import DevicesView from './views/DevicesView.vue'
@@ -26,7 +27,13 @@ const serviceBusy = ref(false)
 const error = ref('')
 const notice = ref('')
 const moreOpen = ref(false)
+const pageActions = ref<PageAction[]>([])
+const pageActionMenuOpen = ref(false)
+const storedTheme = typeof window === 'undefined' ? null : window.localStorage.getItem('honk-theme')
+const followsSystemTheme = ref(storedTheme !== 'light' && storedTheme !== 'dark')
+const theme = ref<'light' | 'dark'>(storedTheme === 'dark' || (storedTheme !== 'light' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light')
 let refreshTimer: number | undefined
+let mediaQuery: MediaQueryList | undefined
 
 const navigation = computed(() => [
   { id: 'home' as const, label: t('home'), icon: Home },
@@ -39,6 +46,7 @@ const navigation = computed(() => [
 function navigate(view: ViewName) {
   active.value = view
   moreOpen.value = false
+  pageActionMenuOpen.value = false
   window.location.hash = view === 'advanced' ? '/advanced/global' : `/${view}`
 }
 
@@ -50,6 +58,57 @@ function showNotice(message: string) {
   notice.value = message
   window.setTimeout(() => { if (notice.value === message) notice.value = '' }, 4000)
 }
+
+function setPageActions(actions: PageAction[]) {
+  pageActions.value = actions
+  pageActionMenuOpen.value = false
+}
+
+const pageActionLabel = computed(() => pageActions.value.length === 1 ? pageActions.value[0].label : t('saveChanges'))
+const pageActionDisabled = computed(() => pageActions.value.length === 0 || pageActions.value.every(action => action.disabled || action.busy))
+const pageActionBusy = computed(() => pageActions.value.some(action => action.busy))
+
+async function runPageAction(action: PageAction) {
+  if (action.disabled || action.busy) return
+  pageActionMenuOpen.value = false
+  try {
+    await action.run()
+  } catch (reason) {
+    error.value = (reason as Error).message
+  }
+}
+
+function triggerPageAction() {
+  if (pageActionDisabled.value) return
+  if (pageActions.value.length === 1) {
+    void runPageAction(pageActions.value[0])
+    return
+  }
+  pageActionMenuOpen.value = !pageActionMenuOpen.value
+}
+
+function closePageActionMenu(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Element) || !target.closest('.page-action-control')) pageActionMenuOpen.value = false
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = theme.value
+  document.documentElement.style.colorScheme = theme.value
+}
+
+function toggleTheme() {
+  followsSystemTheme.value = false
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
+  window.localStorage.setItem('honk-theme', theme.value)
+}
+
+function handleSystemTheme(event: MediaQueryListEvent) {
+  if (followsSystemTheme.value) theme.value = event.matches ? 'dark' : 'light'
+}
+
+watch(active, () => setPageActions([]))
+watch(theme, applyTheme)
 
 async function refresh() {
   if (loading.value) return
@@ -72,11 +131,17 @@ async function service(action: 'start' | 'stop' | 'restart') {
 }
 
 onMounted(() => {
+  applyTheme()
+  mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)')
+  mediaQuery?.addEventListener('change', handleSystemTheme)
+  document.addEventListener('click', closePageActionMenu)
   window.addEventListener('hashchange', hashChanged)
   void refresh()
   refreshTimer = window.setInterval(() => { void refresh() }, 5000)
 })
 onBeforeUnmount(() => {
+  mediaQuery?.removeEventListener('change', handleSystemTheme)
+  document.removeEventListener('click', closePageActionMenu)
   window.removeEventListener('hashchange', hashChanged)
   if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
 })
@@ -99,10 +164,17 @@ onBeforeUnmount(() => {
           <div><strong>{{ state?.running ? t('running') : t('stopped') }}</strong><small v-if="state?.mode">{{ state.mode }}</small></div>
         </div>
         <div class="top-actions">
-          <button class="icon-button" :title="locale === 'zh' ? 'English' : '中文'" :aria-label="locale === 'zh' ? 'English' : '中文'" @click="locale = locale === 'zh' ? 'en' : 'zh'"><Languages :size="18" /></button>
-          <button class="icon-button" :title="t('refresh')" :aria-label="t('refresh')" :disabled="loading" @click="refresh"><RefreshCw :size="18" :class="{ spin: loading }" /></button>
-          <button v-if="state?.running" class="icon-button" :title="t('restart')" :aria-label="t('restart')" :disabled="serviceBusy" @click="service('restart')"><RotateCcw :size="18" /></button>
-          <button class="service-button" :class="state?.running ? 'stop' : 'start'" :disabled="serviceBusy" @click="service(state?.running ? 'stop' : 'start')"><Power :size="17" /><span>{{ state?.running ? t('stop') : t('start') }}</span></button>
+          <button class="icon-button" :title="locale === 'zh' ? 'English' : '中文'" :aria-label="locale === 'zh' ? 'English' : '中文'" @click="locale = locale === 'zh' ? 'en' : 'zh'"><Languages :size="16" /></button>
+          <button class="icon-button" :title="theme === 'dark' ? t('lightMode') : t('darkMode')" :aria-label="theme === 'dark' ? t('lightMode') : t('darkMode')" @click="toggleTheme"><Sun v-if="theme === 'dark'" :size="16" /><Moon v-else :size="16" /></button>
+          <button class="icon-button" :title="t('refresh')" :aria-label="t('refresh')" :disabled="loading" @click="refresh"><RefreshCw :size="16" :class="{ spin: loading }" /></button>
+          <button v-if="state?.running" class="icon-button" :title="t('restart')" :aria-label="t('restart')" :disabled="serviceBusy" @click="service('restart')"><RotateCcw :size="16" /></button>
+          <div v-if="pageActions.length" class="page-action-control">
+            <button class="icon-button page-save-button" :title="pageActionLabel" :aria-label="pageActionLabel" :disabled="pageActionDisabled" @click="triggerPageAction"><Save :size="16" :class="{ spin: pageActionBusy }" /></button>
+            <div v-if="pageActionMenuOpen" class="page-action-menu" role="menu" :aria-label="t('saveChanges')">
+              <button v-for="action in pageActions" :key="action.id" type="button" role="menuitem" :disabled="action.disabled || action.busy" @click="runPageAction(action)">{{ action.label }}</button>
+            </div>
+          </div>
+          <button class="service-button" :class="state?.running ? 'stop' : 'start'" :disabled="serviceBusy" @click="service(state?.running ? 'stop' : 'start')"><Power :size="16" /><span>{{ state?.running ? t('stop') : t('start') }}</span></button>
         </div>
       </header>
 
@@ -110,12 +182,12 @@ onBeforeUnmount(() => {
       <div v-if="notice" class="global-notice" role="status">{{ notice }}</div>
 
       <main class="content" :aria-busy="loading">
-        <HomeView v-if="active === 'home'" :state="state" :loading="loading" @changed="refresh" @notice="showNotice" @error="message => error = message" />
-        <NodesView v-else-if="active === 'nodes'" :state="state" @changed="refresh" @notice="showNotice" @error="message => error = message" />
-        <DevicesView v-else-if="active === 'devices'" :state="state" @changed="refresh" @notice="showNotice" @error="message => error = message" />
-        <AdvancedView v-else-if="active === 'advanced'" @changed="refresh" @notice="showNotice" @error="message => error = message" />
-        <DiagnosticsView v-else-if="active === 'diagnostics'" @notice="showNotice" @error="message => error = message" />
-        <LogsView v-else @error="message => error = message" />
+        <HomeView v-if="active === 'home'" :state="state" :loading="loading" @changed="refresh" @notice="showNotice" @error="message => error = message" @page-actions="setPageActions" />
+        <NodesView v-else-if="active === 'nodes'" :state="state" @changed="refresh" @notice="showNotice" @error="message => error = message" @page-actions="setPageActions" />
+        <DevicesView v-else-if="active === 'devices'" :state="state" @changed="refresh" @notice="showNotice" @error="message => error = message" @page-actions="setPageActions" />
+        <AdvancedView v-else-if="active === 'advanced'" @changed="refresh" @notice="showNotice" @error="message => error = message" @page-actions="setPageActions" />
+        <DiagnosticsView v-else-if="active === 'diagnostics'" @notice="showNotice" @error="message => error = message" @page-actions="setPageActions" />
+        <LogsView v-else @error="message => error = message" @notice="showNotice" />
         <div v-if="loading && !state" class="initial-loading"><Gauge :size="22" class="spin" /><span>{{ t('loading') }}</span></div>
       </main>
     </div>

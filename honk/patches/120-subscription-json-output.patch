@@ -1,0 +1,47 @@
+diff --git a/crates/honk-tool/src/sub.rs b/crates/honk-tool/src/sub.rs
+--- a/crates/honk-tool/src/sub.rs
++++ b/crates/honk-tool/src/sub.rs
+@@ -10,7 +10,7 @@
+ use std::time::{Duration, Instant};
+
+ use anyhow::Context as _;
+-use clap::Args;
++use clap::{Args, ValueEnum};
+ use honk_config::node::Node;
+ use honk_config::subscription::Subscription;
+ use honk_config::types::SubscriptionType;
+@@ -21,6 +21,9 @@
+ #[derive(Args)]
+ pub struct SubArgs {
+     /// Subscription URL (http/https) or a local file with one share link per line.
+     pub source: String,
++    /// Output format. JSON emits the parsed node list without probing it.
++    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
++    pub format: OutputFormat,
+     /// Test target for proxied connectivity/latency (host:port).
+     #[arg(long, default_value = "cp.cloudflare.com:443")]
+@@ -51,7 +54,13 @@
+     #[arg(long, default_value = "[2606:4700:4700::1111]:443")]
+     pub v6_target: Option<SocketAddr>,
+ }
+
++#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
++pub enum OutputFormat {
++    Text,
++    Json,
++}
++
+ struct ProbeOutcome {
+     node_name: String,
+     protocol: String,
+@@ -65,6 +65,10 @@
+
+ pub async fn run(args: SubArgs) -> anyhow::Result<()> {
+     let mut nodes = load_nodes(&args).await?;
++    if args.format == OutputFormat::Json {
++        println!("{}", serde_json::to_string(&nodes)?);
++        return Ok(());
++    }
+     if args.limit > 0 {
+         nodes.truncate(args.limit);
+     }

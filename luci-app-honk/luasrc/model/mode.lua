@@ -1,6 +1,7 @@
 local config = require "luci.model.config"
 local dns = require "luci.model.dns"
 local node = require "luci.model.node"
+local subscription = require "luci.model.subscription"
 
 local M = {}
 
@@ -178,6 +179,9 @@ function M.compile(content, input)
 	local runtime = node.runtime_catalog(content)
 	local runtime_names = {}
 	for _, item in ipairs(runtime.nodes or {}) do runtime_names[#runtime_names + 1] = item.name end
+	for _, item in ipairs(subscription.catalog(node.catalog(content)) or {}) do
+		runtime_names[#runtime_names + 1] = item.name
+	end
 	local selected, source_error = node.select(content, {
 		nodeNames = input.nodeNames or {}, subscriptionNames = input.subscriptionNames or {},
 		runtimeNodeNames = runtime_names,

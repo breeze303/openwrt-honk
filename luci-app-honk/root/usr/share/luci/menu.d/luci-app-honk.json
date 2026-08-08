@@ -59,6 +59,9 @@
 	"admin/services/honk/api/logs": {
 		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_logs" }
 	},
+	"admin/services/honk/api/clear_logs": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_clear_logs" }
+	},
 	"admin/services/honk/api/network_interfaces": {
 		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_network_interfaces" }
 	},

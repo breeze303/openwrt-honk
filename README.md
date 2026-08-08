@@ -143,6 +143,8 @@ git diff --check
 
 `Update Honk upstream` checks upstream `main` every day. When a new revision is available, it downloads the commit archive, calculates its SHA-256 and Git tree, validates every local patch, and creates or updates the `automation/honk-upstream` PR. It can also be run manually from the Actions page. Patch conflicts stop the refresh and retain the current buildable revision.
 
+`Build packages` builds all APK/IPK variants from source in an OpenWrt SDK matrix. Successful `main` and manually dispatched builds retain a shared Rust/BPF cache plus a target-isolated cache for OpenWrt downloads, the Rust host installation, and a size-limited `sccache` directory. Pull requests restore these caches but do not write them. Package build directories and generated APK/IPK files are deliberately excluded, so every run still compiles the current Honk and LuCI sources.
+
 `Build packages` directly builds Honk from its locked upstream source in each OpenWrt SDK matrix job. The helper installs the pinned Rust host feed, nightly `rust-src`, and verified `bpf-linker` before invoking `package/honk/download` and `package/honk/compile`. The matrix builds:
 
 - IPK packages for OpenWrt 24.10 on x86_64 and aarch64_generic.

@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { AlertTriangle, Check, CheckCircle2, ChevronRight, Gauge, RotateCcw, Server, ShieldCheck, X } from '@lucide/vue'
+import { AlertTriangle, Check, CheckCircle2, Gauge, ShieldCheck, X } from '@lucide/vue'
 import { api } from '../api'
 import { t } from '../i18n'
+import type { PageAction } from '../page-actions'
 import type { ConnectivityCheck, ModeInput, ModeName, PreviewResponse, StateResponse } from '../types'
+import SourcePicker from '../components/SourcePicker.vue'
+import type { SourcePickerGroup, SourcePickerOption } from '../components/SourcePicker.vue'
 
 const props = defineProps<{ state: StateResponse | null; loading: boolean }>()
-const emit = defineEmits<{ changed: []; notice: [message: string]; error: [message: string] }>()
+const emit = defineEmits<{ changed: []; notice: [message: string]; error: [message: string]; pageActions: [actions: PageAction[]] }>()
 
 const selectedMode = ref<ModeName>('china-direct')
 const selectedSource = ref('')
@@ -33,11 +36,64 @@ const connectivityTargets: Array<Pick<ConnectivityCheck, 'id' | 'url' | 'route'>
   { id: 'youtube', url: 'https://www.youtube.com', route: 'honk-proxy' },
 ]
 
-const sources = computed(() => [
-  ...(Array.isArray(props.state?.catalog?.nodes) ? props.state.catalog.nodes : []).map(item => ({ ...item, value: `node:${item.name}` })),
-  ...(Array.isArray(props.state?.catalog?.subscriptions) ? props.state.catalog.subscriptions : []).filter(item => item.enabled !== false).map(item => ({ ...item, value: `subscription:${item.name}` })),
-  ...(Array.isArray(props.state?.catalog?.subscriptionNodes) ? props.state.catalog.subscriptionNodes : []).map(item => ({ ...item, value: `runtime:${item.name}` })),
-])
+const sourceGroups = computed<SourcePickerGroup[]>(() => {
+  const nodes = Array.isArray(props.state?.catalog?.nodes) ? props.state.catalog.nodes : []
+  const subscriptions = (Array.isArray(props.state?.catalog?.subscriptions) ? props.state.catalog.subscriptions : []).filter(item => item.enabled !== false)
+  const runtimeNodes = Array.isArray(props.state?.catalog?.subscriptionNodes) ? props.state.catalog.subscriptionNodes : []
+  const groups: SourcePickerGroup[] = []
+
+  const manualOptions: SourcePickerOption[] = nodes.map(item => ({
+    value: `node:${item.name}`,
+    label: item.name,
+    detail: item.protocol,
+    kind: 'node',
+    searchText: `${item.name} ${item.protocol}`.toLocaleLowerCase(),
+  }))
+  if (manualOptions.length) groups.push({ id: 'manual', label: t('manualNodes'), count: manualOptions.length, options: manualOptions })
+
+  const groupedSubscriptions = new Set<string>()
+  for (const subscription of subscriptions) {
+    groupedSubscriptions.add(subscription.name)
+    const subscriptionNodes = runtimeNodes.filter(item => item.subscription === subscription.name)
+    const options: SourcePickerOption[] = [
+      {
+        value: `subscription:${subscription.name}`,
+        label: subscription.name,
+        detail: t('useSubscription'),
+        kind: 'subscription',
+        searchText: `${subscription.name} ${t('useSubscription')}`.toLocaleLowerCase(),
+      },
+      ...subscriptionNodes.map(item => ({
+        value: `runtime:${item.name}`,
+        label: item.name,
+        detail: item.protocol,
+        kind: 'runtime' as const,
+        searchText: `${item.name} ${item.protocol} ${subscription.name}`.toLocaleLowerCase(),
+      })),
+    ]
+    groups.push({ id: `subscription:${subscription.name}`, label: subscription.name, count: subscriptionNodes.length, options })
+  }
+
+  const unassigned = runtimeNodes.filter(item => !groupedSubscriptions.has(item.subscription))
+  if (unassigned.length) {
+    groups.push({
+      id: 'runtime-unassigned',
+      label: t('unassignedNodes'),
+      count: unassigned.length,
+      options: unassigned.map(item => ({
+        value: `runtime:${item.name}`,
+        label: item.name,
+        detail: item.protocol,
+        kind: 'runtime',
+        searchText: `${item.name} ${item.protocol} ${item.subscription}`.toLocaleLowerCase(),
+      })),
+    })
+  }
+
+  return groups
+})
+
+const sources = computed(() => sourceGroups.value.flatMap(group => group.options))
 
 watch(() => props.state, state => {
   if (!state) return
@@ -72,6 +128,12 @@ watch(() => props.state, state => {
 function markSourceDirty() {
   sourceDirty.value = true
   awaitingApply.value = false
+}
+
+function selectSource(value: string) {
+  if (value === selectedSource.value) return
+  selectedSource.value = value
+  markSourceDirty()
 }
 
 function modeInput(takeover = false): ModeInput {
@@ -145,20 +207,25 @@ async function testConnectivity(id: ConnectivityCheck['id']) {
     connectivityBusy.value = { ...connectivityBusy.value, [id]: false }
   }
 }
+
+function publishPageActions() {
+  emit('pageActions', [{
+    id: 'apply-mode',
+    label: t('apply'),
+    disabled: busy.value || props.loading || !selectedSource.value,
+    busy: busy.value,
+    run: openPreview,
+  }])
+}
+
+watch([selectedSource, busy, () => props.loading, () => props.state?.revision], publishPageActions, { immediate: true })
 </script>
 
 <template>
   <div class="page home-page">
-    <header class="page-heading home-heading">
-      <div class="service-pill" :class="state?.running ? 'ok' : 'muted'" role="status">
-        <span class="status-dot" />
-        <strong>{{ state?.running ? t('running') : t('stopped') }}</strong>
-      </div>
-    </header>
-
     <section class="mode-section" aria-labelledby="mode-heading">
       <div class="section-label">
-        <div><span>01</span><h2 id="mode-heading">{{ t('currentMode') }}</h2></div>
+        <div><h2 id="mode-heading">{{ t('currentMode') }}</h2></div>
         <strong>{{ modes.find(item => item.id === selectedMode)?.label() }}</strong>
       </div>
       <div class="mode-grid">
@@ -172,25 +239,27 @@ async function testConnectivity(id: ConnectivityCheck['id']) {
 
     <section class="source-section" aria-labelledby="source-heading">
       <div class="section-label">
-        <div><span>02</span><h2 id="source-heading">{{ t('currentSource') }}</h2></div>
+        <div><h2 id="source-heading">{{ t('currentSource') }}</h2></div>
       </div>
-      <label class="source-select">
-        <Server :size="18" />
-        <select v-model="selectedSource" :disabled="sources.length === 0" @change="markSourceDirty">
-          <option value="" disabled>{{ t('sourceRequired') }}</option>
-          <option v-for="item in sources" :key="item.value" :value="item.value">{{ item.name }} · {{ item.protocol }}{{ 'subscription' in item ? ` · ${item.subscription === 'runtime' ? t('subscriptionNodes') : item.subscription}` : '' }}</option>
-        </select>
-        <ChevronRight :size="18" />
-      </label>
+      <SourcePicker
+        :model-value="selectedSource"
+        :groups="sourceGroups"
+        :disabled="sources.length === 0"
+        :placeholder="t('sourceRequired')"
+        :search-placeholder="t('searchNodes')"
+        :empty-label="t('noMatchingNodes')"
+        :ariaLabel="t('currentSource')"
+        @update:model-value="selectSource"
+      />
       <p v-if="sources.length === 0" class="inline-warning"><AlertTriangle :size="16" />{{ t('emptyNodes') }}</p>
-      <p v-else-if="state?.catalog?.subscriptions?.length && !state?.catalog?.runtimeAvailable" class="inline-warning"><AlertTriangle :size="16" />{{ state?.catalog?.runtimeConfigured ? (state?.running ? t('runtimeWaiting') : t('runtimeUnavailable')) : t('runtimeApiDisabled') }}</p>
+      <p v-else-if="state?.catalog?.subscriptions?.length && !state?.catalog?.runtimeAvailable && !state?.catalog?.cacheAvailable" class="inline-warning"><AlertTriangle :size="16" />{{ state?.catalog?.runtimeConfigured ? (state?.running ? t('runtimeWaiting') : t('runtimeUnavailable')) : t('runtimeApiDisabled') }}</p>
     </section>
 
     <section class="connectivity-section" aria-labelledby="connectivity-heading" aria-live="polite">
       <div class="connectivity-head">
         <div>
           <div class="section-label compact">
-            <div><span>03</span><h2 id="connectivity-heading">{{ t('connectivity') }}</h2></div>
+            <div><h2 id="connectivity-heading">{{ t('connectivity') }}</h2></div>
           </div>
           <p class="connectivity-hint">{{ t('connectivityHint') }}</p>
         </div>
@@ -209,30 +278,6 @@ async function testConnectivity(id: ConnectivityCheck['id']) {
               <Gauge :size="15" :class="{ spin: connectivityBusy[target.id] }" />{{ connectivityBusy[target.id] ? t('testingConnectivity') : t('testConnectivity') }}
             </button>
           </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="apply-band">
-      <div>
-        <span>{{ t('configRevision') }}</span>
-        <code>{{ state?.revision?.slice(0, 12) || '—' }}</code>
-      </div>
-      <button class="primary-command" :disabled="busy || loading || !selectedSource" @click="openPreview">
-        <ShieldCheck :size="18" />{{ busy ? t('applying') : t('apply') }}
-      </button>
-    </section>
-
-    <section class="recent-section" aria-labelledby="recent-heading">
-      <div class="section-label compact">
-        <div><span>04</span><h2 id="recent-heading">{{ t('recentState') }}</h2></div>
-      </div>
-      <div class="recent-row" :class="{ warning: state?.rollback }">
-        <RotateCcw v-if="state?.rollback" :size="18" />
-        <CheckCircle2 v-else :size="18" />
-        <div>
-          <strong>{{ state?.rollback ? t('rollback') : (state?.last.stage || t('noError')) }}</strong>
-          <span>{{ state?.recentError || state?.last.updatedAt || t('noError') }}</span>
         </div>
       </div>
     </section>

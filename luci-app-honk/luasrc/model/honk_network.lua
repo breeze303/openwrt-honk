@@ -142,6 +142,7 @@ function M.current(content)
 		lan = trim(values.lan_interface),
 		wan = trim(values.wan_interface),
 		dialMode = trim(values.dial_mode) ~= "" and trim(values.dial_mode) or "domain",
+		logLevel = trim(values.log_level) ~= "" and trim(values.log_level):lower() or "info",
 	}
 end
 
@@ -164,18 +165,21 @@ function M.update_global(content, values)
 	local global, section_error = config.section(content, "global")
 	if section_error then return nil, section_error end
 	if not global then
-		return config.replace_section(content, "global", table.concat({
+		local lines = {
 			"global {",
 			"\twan_interface: " .. config.dae_quote(values.wan),
 			"\tlan_interface: " .. config.dae_quote(values.lan),
 			"\tdial_mode: " .. config.dae_quote(values.dialMode),
-			"}",
-		}, "\n"))
+		}
+		if values.logLevel and values.logLevel ~= "" then lines[#lines + 1] = "\tlog_level: " .. config.dae_quote(values.logLevel) end
+		lines[#lines + 1] = "}"
+		return config.replace_section(content, "global", table.concat(lines, "\n"))
 	end
 	local body = config.section_body(content, global)
 	body = replace_key(body, "lan_interface", values.lan)
 	body = replace_key(body, "wan_interface", values.wan)
 	body = replace_key(body, "dial_mode", values.dialMode)
+	if values.logLevel and values.logLevel ~= "" then body = replace_key(body, "log_level", values.logLevel) end
 	local block = "global {" .. body .. "}"
 	return content:sub(1, global.start - 1) .. block .. content:sub(global.finish + 1)
 end

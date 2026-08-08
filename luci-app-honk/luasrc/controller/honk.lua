@@ -6,7 +6,7 @@ local nixio = require "nixio"
 
 local API_NAMES = {
 	"state", "preview", "apply", "service", "sources", "advanced", "validate_advanced",
-	"apply_advanced", "refresh_subscription", "delay", "connectivity", "diagnostics", "logs",
+	"apply_advanced", "refresh_subscription", "subscription_cache", "delete_subscription_cache", "delay", "connectivity", "diagnostics", "logs", "clear_logs",
 	"toggle_clash_api", "default_config", "reset_config",
 	"network_interfaces", "apply_interfaces", "geo_settings", "geo_download",
 }
@@ -76,12 +76,15 @@ function api_advanced() respond(require("luci.model.service").advanced()) end
 function api_default_config() respond(require("luci.model.service").default_config()) end
 function api_diagnostics() respond(require("luci.model.service").diagnostics()) end
 function api_logs() respond(require("luci.model.service").logs()) end
+function api_clear_logs() mutate("clear_logs") end
 function api_preview() mutate("preview") end
 function api_apply() mutate("apply") end
 function api_sources() mutate("mutate_source") end
 function api_apply_advanced() mutate("apply_advanced") end
 function api_toggle_clash_api() mutate("toggle_clash_api") end
 function api_refresh_subscription() mutate("refresh_subscription") end
+function api_subscription_cache() mutate("subscription_cache") end
+function api_delete_subscription_cache() mutate("delete_subscription_cache") end
 function api_delay() mutate("delay") end
 function api_connectivity() mutate("connectivity") end
 function api_reset_config() mutate("reset_config") end

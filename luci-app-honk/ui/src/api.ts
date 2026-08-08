@@ -1,4 +1,4 @@
-import type { ConnectivityCheck, ConnectivityResponse, DelayResponse, DiagnosticsResponse, DialMode, ModeInput, NetworkDiscovery, PreviewResponse, StateResponse } from './types'
+import type { ConnectivityCheck, ConnectivityResponse, DelayResponse, DiagnosticsResponse, DialMode, LogLevel, ModeInput, NetworkDiscovery, PreviewResponse, StateResponse, SubscriptionCacheResponse } from './types'
 
 export type DefaultConfigResponse = {
   ok: boolean
@@ -32,6 +32,7 @@ function normalizeState(value: StateResponse): StateResponse {
       subscriptionNodes?: unknown
       runtimeAvailable?: boolean
       runtimeConfigured?: boolean
+      cacheAvailable?: boolean
     }
     selected?: { nodes?: unknown; subscriptions?: unknown }
     deviceRules?: unknown
@@ -46,6 +47,7 @@ function normalizeState(value: StateResponse): StateResponse {
       subscriptionNodes: listValue(catalog.subscriptionNodes),
       runtimeAvailable: catalog.runtimeAvailable,
       runtimeConfigured: catalog.runtimeConfigured,
+      cacheAvailable: catalog.cacheAvailable,
     },
     selected: {
       nodes: listValue(selected.nodes),
@@ -105,6 +107,8 @@ export const api = {
     .then(result => ({ ...result, state: normalizeState(result.state) })),
   mutateSource: (input: Record<string, unknown>) => request<{ ok: boolean }>('sources', input),
   refreshSubscription: (name: string) => request<{ ok: boolean; accepted: boolean }>('refresh_subscription', { name }),
+  subscriptionCache: (name: string) => request<SubscriptionCacheResponse>('subscription_cache', { name }),
+  deleteSubscriptionCache: (name: string) => request<{ ok: boolean; name: string; removed: boolean }>('delete_subscription_cache', { name }),
   delay: (name: string) => request<DelayResponse>('delay', { name }),
   connectivity: (id: ConnectivityCheck['id']) => request<ConnectivityResponse>('connectivity', { id }),
   advanced: () => request<StateResponse>('advanced').then(normalizeState),
@@ -114,9 +118,10 @@ export const api = {
   applyAdvanced: (config: string, expectedRevision: string) => request<{ ok: boolean; revision: string }>('apply_advanced', { config, expectedRevision }),
   toggleClashApi: (enabled: boolean, expectedRevision: string) => request<{ ok: boolean; enabled: boolean; changed: boolean; revision: string }>('toggle_clash_api', { enabled, expectedRevision }),
   networkInterfaces: () => request<NetworkDiscovery>('network_interfaces'),
-  applyInterfaces: (input: { lanDevice: string; wanDevice: string; dialMode: DialMode; expectedRevision: string }) => request<{ ok: boolean; revision: string; running: boolean; interfaces: { lan: string; wan: string }; dialMode: DialMode; config?: string }>('apply_interfaces', input),
+  applyInterfaces: (input: { lanDevice: string; wanDevice: string; dialMode: DialMode; logLevel: LogLevel; expectedRevision: string }) => request<{ ok: boolean; revision: string; running: boolean; interfaces: { lan: string; wan: string }; dialMode: DialMode; logLevel: LogLevel; config?: string }>('apply_interfaces', input),
   diagnostics: () => request<DiagnosticsResponse>('diagnostics'),
   geoSettings: (input: { geositeUrl: string; geoipUrl: string; allowCustom: boolean }) => request<{ ok: boolean; geositeUrl: string; geoipUrl: string; allowCustom: boolean }>('geo_settings', input),
   geoDownload: (kind: 'geosite' | 'geoip') => request<{ ok: boolean; kind: string; path: string; status?: string; needsRestart: boolean }>('geo_download', { kind }),
   logs: () => request<{ ok: boolean; lines: string }>('logs'),
+  clearLogs: () => request<{ ok: boolean; cleared: boolean }>('clear_logs', {}),
 }

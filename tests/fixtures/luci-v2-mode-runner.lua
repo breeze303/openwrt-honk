@@ -22,6 +22,9 @@ for _, name in ipairs({ "config", "dns", "node", "mode" }) do
 	local path = arg[1] .. "/luci-app-honk/luasrc/model/" .. name .. ".lua"
 	package.preload["luci.model." .. name] = function() return dofile(path) end
 end
+package.preload["luci.model.subscription"] = function()
+	return { catalog = function() return {} end }
+end
 local mode = require "luci.model.mode"
 local config = require "luci.model.config"
 local source = read(arg[2])

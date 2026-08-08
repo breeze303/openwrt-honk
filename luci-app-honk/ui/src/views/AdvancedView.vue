@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { AlertTriangle, CheckCircle2, FileCode2, Network, Power, RadioTower, RefreshCw, RotateCcw, Save, Settings2, ShieldCheck } from '@lucide/vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { AlertTriangle, CheckCircle2, FileCode2, Network, Power, RadioTower, RefreshCw, RotateCcw, ScrollText, Settings2, ShieldCheck } from '@lucide/vue'
 import { api } from '../api'
 import { t } from '../i18n'
-import type { DialMode, NetworkDiscovery, StateResponse } from '../types'
+import type { PageAction } from '../page-actions'
+import type { DialMode, LogLevel, NetworkDiscovery, StateResponse } from '../types'
 
-const emit = defineEmits<{ changed: []; notice: [message: string]; error: [message: string] }>()
+const emit = defineEmits<{ changed: []; notice: [message: string]; error: [message: string]; pageActions: [actions: PageAction[]] }>()
 const source = ref('')
 const revision = ref('')
 const loading = ref(true)
@@ -16,6 +17,7 @@ const discovery = ref<NetworkDiscovery | null>(null)
 const lanDevice = ref('')
 const wanDevice = ref('')
 const dialMode = ref<DialMode>('domain')
+const logLevel = ref<LogLevel>('info')
 const interfaceBusy = ref(false)
 const loadedSource = ref('')
 type AdvancedTab = 'global' | 'config'
@@ -114,6 +116,14 @@ function syncNetworkOptions(content: string): string {
   return content.slice(0, section.open + 1) + body + content.slice(section.close)
 }
 
+function configuredLogLevel(content: string): LogLevel {
+  const section = globalSection(content)
+  if (!section) return 'info'
+  const value = content.slice(section.open + 1, section.close).match(/(?:^|\n)\s*log_level\s*:\s*([^#\n]+)/)?.[1]?.trim() || ''
+  const normalized = value.replace(/^['"]|['"]$/g, '').toLowerCase()
+  return normalized === 'trace' || normalized === 'debug' || normalized === 'info' || normalized === 'warn' || normalized === 'error' ? normalized : 'info'
+}
+
 async function load(preferredConfig = '') {
   loading.value = true
   try {
@@ -127,6 +137,7 @@ async function load(preferredConfig = '') {
       }
     }
     loadedSource.value = source.value
+    logLevel.value = configuredLogLevel(source.value)
     revision.value = state.revision
     clashApi.value = state.clashApi || { enabled: false, controller: '', secretConfigured: false }
     valid.value = false
@@ -147,13 +158,13 @@ async function applyInterfaces() {
     emit('error', t('interfaceUnavailable'))
     return
   }
-  if (!window.confirm(t('interfaceApplyConfirm'))) return
+  if (!window.confirm(t('globalSettingsApplyConfirm'))) return
   interfaceBusy.value = true
   try {
-    const result = await api.applyInterfaces({ lanDevice: lanDevice.value, wanDevice: wanDevice.value, dialMode: dialMode.value, expectedRevision: revision.value })
+    const result = await api.applyInterfaces({ lanDevice: lanDevice.value, wanDevice: wanDevice.value, dialMode: dialMode.value, logLevel: logLevel.value, expectedRevision: revision.value })
     if (result.config) source.value = result.config
     if (result.revision) revision.value = result.revision
-    emit('notice', t('interfaceApplied'))
+    emit('notice', t('globalSettingsApplied'))
     emit('changed')
     await load(result.config || '')
   } catch (reason) {
@@ -241,6 +252,27 @@ async function restoreDefault() {
   }
 }
 
+function publishPageActions() {
+  const action: PageAction = activeTab.value === 'config'
+    ? {
+        id: 'apply-advanced-config',
+        label: t('confirmApply'),
+        disabled: busy.value || loading.value,
+        busy: busy.value,
+        run: apply,
+      }
+    : {
+        id: 'apply-interfaces',
+        label: t('applyGlobalSettings'),
+        disabled: busy.value || loading.value || interfaceBusy.value || !lanDevice.value || !wanDevice.value,
+        busy: busy.value || interfaceBusy.value,
+        run: applyInterfaces,
+      }
+  emit('pageActions', [action])
+}
+
+watch([activeTab, busy, loading, interfaceBusy, lanDevice, wanDevice, logLevel], publishPageActions, { immediate: true })
+
 onMounted(() => {
   activeTab.value = tabFromHash()
   if (window.location.hash.replace(/^#\/?/, '') === 'advanced') window.history.replaceState(null, '', tabHash(activeTab.value))
@@ -268,6 +300,12 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', handleHashChange)
         <button :class="clashApi.enabled ? 'secondary-button' : 'primary-command'" :disabled="busy || loading" @click="toggleClashApi"><Power :size="17" />{{ clashApi.enabled ? t('disableClashApi') : t('enableClashApi') }}</button>
       </div>
     </section>
+    <section class="tool-panel log-level-panel">
+      <header class="section-heading">
+        <div class="clash-api-title"><ScrollText :size="20" /><div><h2>{{ t('logSettings') }}</h2><p>{{ t('logLevelHint') }}</p></div></div>
+      </header>
+      <label class="log-level-field"><span>{{ t('logLevel') }}</span><select v-model="logLevel" :disabled="busy || loading || interfaceBusy"><option value="trace">{{ t('logLevelTrace') }}</option><option value="debug">{{ t('logLevelDebug') }}</option><option value="info">{{ t('logLevelInfo') }}</option><option value="warn">{{ t('logLevelWarn') }}</option><option value="error">{{ t('logLevelError') }}</option></select></label>
+    </section>
     <section class="tool-panel interface-panel" :aria-busy="interfaceBusy">
       <header class="interface-heading">
         <div class="clash-api-title"><Network :size="20" /><div><h2>{{ t('networkBinding') }}</h2><p>{{ t('networkBindingHint') }}</p></div></div>
@@ -281,7 +319,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', handleHashChange)
         <label class="dial-mode-field"><span>{{ t('dialMode') }}</span><select v-model="dialMode" :disabled="busy || loading || interfaceBusy"><option value="ip">{{ t('dialModeIp') }}</option><option value="domain">{{ t('dialModeDomain') }}</option><option value="domain+">{{ t('dialModePlus') }}</option><option value="domain++">{{ t('dialModePlusPlus') }}</option></select><small>{{ t('dialModeHint') }}</small></label>
         <div class="network-candidates"><span>{{ t('interfaceCandidates') }}</span><div v-for="item in discovery?.candidates || []" :key="item.l3Device" class="network-candidate"><strong>{{ item.l3Device }}</strong><small>{{ item.logicalName || item.kind }} · {{ item.up ? t('interfaceStatusUp') : t('interfaceStatusDown') }}<template v-if="item.defaultRoute"> · {{ t('interfaceRoute') }} {{ item.defaultRoute.metric }}</template></small></div><p v-if="!discovery?.candidates?.length">{{ t('interfaceUnknown') }}</p></div>
       </div>
-      <div class="interface-actions"><span v-if="discovery?.recommended?.lan && discovery?.recommended?.wan">{{ t('interfaceRecommended') }}: {{ discovery.recommended.lan }} / {{ discovery.recommended.wan }}</span><button class="primary-command" :disabled="busy || loading || interfaceBusy || !lanDevice || !wanDevice" @click="applyInterfaces"><Save :size="17" />{{ t('interfaceApply') }}</button></div>
+      <div class="interface-actions"><span v-if="discovery?.recommended?.lan && discovery?.recommended?.wan">{{ t('interfaceRecommended') }}: {{ discovery.recommended.lan }} / {{ discovery.recommended.wan }}</span></div>
     </section>
     </template>
 
@@ -294,7 +332,6 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', handleHashChange)
     <div class="sticky-actions split">
       <span v-if="valid" class="valid-label"><CheckCircle2 :size="17" />{{ t('valid') }}</span><span v-else />
       <button class="secondary-button" :disabled="busy || loading" @click="validate"><ShieldCheck :size="18" />{{ t('validate') }}</button>
-      <button class="primary-command" :disabled="busy || loading" @click="apply"><Save :size="18" />{{ t('confirmApply') }}</button>
     </div>
     </template>
   </div>

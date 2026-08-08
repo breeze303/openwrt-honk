@@ -143,6 +143,8 @@ git diff --check
 
 `Update Honk upstream` 每天检查上游 `main`。发现新提交后，它会下载提交归档、计算 SHA-256 和 Git tree、验证本仓库的全部补丁，然后创建或更新 `automation/honk-upstream` PR。也可以从 Actions 页面手动运行该工作流。补丁冲突会直接中止更新，保留当前可构建版本。
 
+`Build packages` 会在 OpenWrt SDK 矩阵中从源码构建全部 APK/IPK 变体。成功的 `main` 构建和手动构建会保存一份共享的 Rust/BPF 缓存，以及按 SDK 与目标架构隔离的 OpenWrt 下载、Rust host 安装状态和限制容量的 `sccache` 缓存。PR 只读取这些缓存而不写入。软件包构建目录和生成的 APK/IPK 不会进入缓存，因此每次运行仍会编译当前的 Honk 与 LuCI 源码。
+
 `Build packages` 工作流在每个 OpenWrt SDK 矩阵任务中直接从锁定的上游源码构建 Honk。辅助脚本会安装锁定的 Rust host feed、nightly `rust-src` 和已校验的 `bpf-linker`，然后调用 `package/honk/download` 与 `package/honk/compile`。构建矩阵包括：
 
 - OpenWrt 24.10：x86_64 和 aarch64_generic 的 IPK。

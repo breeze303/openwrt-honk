@@ -12,7 +12,7 @@ cd "$repo_root"
 
 grep -Fx "PKG_SOURCE_VERSION:=$commit" honk/source.mk >/dev/null
 grep -Eq '^PKG_MIRROR_HASH:=[0-9a-f]{64}$' honk/source.mk
-jq -e --arg commit "$commit" '.source.commit == $commit and (.source.patchDigests | length == 2)' locks/source.lock.json >/dev/null
+jq -e --arg commit "$commit" '.source.commit == $commit and (.source.patchDigests | length == 8)' locks/source.lock.json >/dev/null
 while IFS=$'\t' read -r patch_path patch_sha; do
 	test "$(sha256sum "$patch_path" | cut -d ' ' -f 1)" = "$patch_sha"
 done < <(jq -r '.source.patchDigests[] | [.path, .sha256] | @tsv' locks/source.lock.json)
@@ -54,6 +54,10 @@ grep -F 'GEO_SITE_CACHE' honk/Makefile >/dev/null
 grep -F 'DAE_LOCATION_ASSET' honk/files/honk.init >/dev/null
 grep -F 'DAE_ALLOW_CUSTOM_GEO' honk/files/honk.init >/dev/null
 grep -F 'write_live_receipt' honk/files/honk.init >/dev/null
+test "$(grep -Ec '^[[:space:]]*procd_set_param env' honk/files/honk.init)" -eq 1
+grep -F '"DAE_LOCATION_ASSET=$ASSET_DIR"' honk/files/honk.init >/dev/null
+grep -F '"HONK_SUBSCRIPTION_CACHE_DIR=/etc/honk/subscriptions"' honk/files/honk.init >/dev/null
+grep -F '"HONK_SUBSCRIPTION_CACHE_TTL=$SUBSCRIPTION_CACHE_TTL"' honk/files/honk.init >/dev/null
 grep -F "ls -ln " luci-app-honk/luasrc/model/service.lua >/dev/null
 if grep -Fq 'stat -c %s' luci-app-honk/luasrc/model/service.lua; then
 	echo 'runtime diagnostics must use BusyBox base commands' >&2
@@ -178,6 +182,11 @@ bash tests/test-quick-setup-contract.sh --evidence "$evidence_root/quick-contrac
 bash tests/test-dns-projection.sh --evidence "$evidence_root/dns"
 bash tests/test-quick-transaction.sh --evidence "$evidence_root/quick-transaction"
 bash tests/test-luci-package-isolation.sh
+grep -F 'pub payload_file: Option<PathBuf>' honk/patches/140-subscription-cache-payload-parser.patch >/dev/null
+grep -F 'parse_content(sub, &content)' honk/patches/140-subscription-cache-payload-parser.patch >/dev/null
+grep -F 'SubscriptionType::Custom' honk/patches/150-dae-subscription-auto-parser.patch >/dev/null
+grep -F 'registry_mount_exists' honk/patches/160-preserve-existing-netns-registry.patch >/dev/null
+grep -F 'canonical_path' honk/patches/170-resolve-netns-registry-realpath.patch >/dev/null
 bash tests/test-luci-v2-contract.sh
 bash tests/test-target-harness-contract.sh "$evidence_root/target-harness"
 .github/scripts/check-dashboard-assets.sh --manifest "$evidence_root/assets.json"

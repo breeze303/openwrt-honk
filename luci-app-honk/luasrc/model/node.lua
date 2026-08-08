@@ -73,6 +73,32 @@ function M.catalog(content)
 	return { nodes = nodes, subscriptions = subscriptions }
 end
 
+-- Keep subscription URLs out of the public catalog returned to LuCI. Refresh
+-- operations need the configured URL, while dashboard state must only expose
+-- the subscription metadata.
+function M.subscription_url(content, name)
+	if type(name) ~= "string" or name == "" then return nil end
+	local subscription_section = config.section(content, "subscription")
+	if not subscription_section then return nil end
+	local body = config.section_body(content, subscription_section)
+	local sections = nested_sections(body)
+	for _, section in ipairs(sections) do
+		if section.name == name then
+			local url = config.key_values(config.section_body(body, section)).url
+			if type(url) == "string" and url ~= "" then return url end
+		end
+	end
+	local flat = body
+	for index = #sections, 1, -1 do
+		local section = sections[index]
+		flat = flat:sub(1, section.start - 1) .. flat:sub(section.finish + 1)
+	end
+	for _, entry in ipairs(config.named_entries(flat)) do
+		if entry.name == name and type(entry.value) == "string" and entry.value ~= "" then return entry.value end
+	end
+	return nil
+end
+
 local function url_encode(value)
 	return tostring(value or ""):gsub("([^%w_.~-])", function(char)
 		return string.format("%%%02X", string.byte(char))
@@ -117,15 +143,7 @@ function M.refresh_subscription(content, name)
 	local sys = require "luci.sys"
 	local endpoint, headers = clash_api(content)
 	if not endpoint then
-		-- Subscription fetching is a core service concern.  When the optional
-		-- Clash control plane is disabled, restart/start Honk so its native
-		-- startup fetch refreshes all configured subscriptions.
-		local init = os.getenv("HONK_INIT_PATH") or "/etc/init.d/honk"
-		local running = sys.call("pidof honk-core >/dev/null 2>&1") == 0
-		local action = running and "restart" or "start"
-		local code = sys.call(config.shell_quote(init) .. " " .. action .. " >/dev/null 2>&1")
-		if code ~= 0 then return false, "Honk service refresh failed" end
-		return true, nil
+		return false, "CLASH_API_UNAVAILABLE"
 	end
 	local url = endpoint .. "/subscriptions/" .. url_encode(name) .. "/refresh"
 	local command = "wget -q -T 3 -t 1 --post-data=''" .. (headers or "") .. " -O /dev/null " .. config.shell_quote(url) .. " 2>/dev/null"

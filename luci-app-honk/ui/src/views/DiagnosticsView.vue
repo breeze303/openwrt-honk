@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { Activity, CheckCircle2, Database, Download, FileCheck2, FileWarning, RefreshCw, Save, Wrench } from '@lucide/vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { Activity, CheckCircle2, Database, Download, FileCheck2, FileWarning, RefreshCw, Wrench } from '@lucide/vue'
 import { api } from '../api'
 import { t } from '../i18n'
+import type { PageAction } from '../page-actions'
 import type { DiagnosticsResponse, GeoAssetDiagnostic, RuntimeFileDiagnostic } from '../types'
 
-const emit = defineEmits<{ notice: [message: string]; error: [message: string] }>()
+const emit = defineEmits<{ notice: [message: string]; error: [message: string]; pageActions: [actions: PageAction[]] }>()
 const data = ref<DiagnosticsResponse | null>(null)
 const loading = ref(false)
 const savingGeo = ref(false)
@@ -86,6 +87,18 @@ const fileItems = computed(() => {
   ].map(([key, label]) => ({ key, label, item: files[key as keyof typeof files] as RuntimeFileDiagnostic }))
 })
 
+function publishPageActions() {
+  emit('pageActions', [{
+    id: 'save-geo-settings',
+    label: t('saveGeoSettings'),
+    disabled: savingGeo.value || !settingsDirty.value,
+    busy: savingGeo.value,
+    run: saveGeoSettings,
+  }])
+}
+
+watch([settingsDirty, savingGeo], publishPageActions, { immediate: true })
+
 onMounted(load)
 </script>
 
@@ -111,7 +124,6 @@ onMounted(load)
       </div>
       <div class="geo-settings-actions">
         <label class="checkbox-field"><input v-model="allowCustom" type="checkbox" @change="settingsDirty = true" /><span>{{ t('allowCustomGeo') }}</span></label>
-        <button class="primary-command" :disabled="savingGeo || !settingsDirty" @click="saveGeoSettings"><Save :size="17" />{{ savingGeo ? t('saving') : t('saveGeoSettings') }}</button>
       </div>
       <div class="geo-asset-grid">
         <article v-for="kind in ['geosite', 'geoip']" :key="kind" class="geo-asset-card">

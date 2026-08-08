@@ -89,6 +89,55 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
 
+      - name: Resolve SDK cache identity
+        id: sdk-cache-key
+        shell: bash
+        env:
+          SDK_IMAGE: ghcr.io/openwrt/sdk:${{ matrix.arch }}-${{ matrix.sdk }}
+        run: |
+          set -euo pipefail
+          docker pull "$SDK_IMAGE"
+          image_id=$(docker image inspect --format '{{.Id}}' "$SDK_IMAGE")
+          script_hash=$(sha256sum \
+            .github/workflows/build-packages.yml \
+            .github/scripts/build-packages-in-sdk.sh \
+            locks/toolchains.lock.json | sha256sum | cut -d ' ' -f 1)
+          cache_identity=$(printf '%s\n%s\n%s\n%s\n%s\n' \
+            "$image_id" \
+            "${{ matrix.arch }}" \
+            "${{ matrix.sdk }}" \
+            "$script_hash" \
+            "toolchain-cache-v1" | sha256sum | cut -d ' ' -f 1)
+          shared_cache_identity=$(printf '%s\n%s\n' \
+            "$script_hash" \
+            "shared-rust-bpf-cache-v1" | sha256sum | cut -d ' ' -f 1)
+          {
+            echo "image_id=$image_id"
+            echo "cache_identity=$cache_identity"
+            echo "shared_cache_identity=$shared_cache_identity"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Restore shared Rust and BPF cache
+        id: shared-tool-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            .ci-cache/openwrt/cargo
+            .ci-cache/openwrt/rustup
+            .ci-cache/openwrt/rust-feed
+            .ci-cache/openwrt/tool-downloads
+          key: honk-rust-bpf-v1-${{ runner.os }}-${{ steps.sdk-cache-key.outputs.shared_cache_identity }}
+
+      - name: Restore SDK toolchain cache
+        id: sdk-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            .ci-cache/openwrt/dl
+            .ci-cache/openwrt/sccache
+            .ci-cache/openwrt/rust-host
+          key: honk-sdk-toolchain-v1-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.sdk }}-${{ steps.sdk-cache-key.outputs.cache_identity }}
+
       - name: Prepare locked Geo assets
         shell: bash
         run: |
@@ -115,31 +164,44 @@ jobs:
           BPF_LINKER_VERSION: 0.10.4
           BPF_RUST_TOOLCHAIN: nightly-2026-07-20
           RUST_FEED_COMMIT: 2006dff59caa09bc3bc22ffdc84df2aa1c8d0c8a
+          SCCACHE_VERSION: 0.17.0
+          SCCACHE_SHA256: 67c4a96dd237c1f518f6b36083f270f9976d516f1e57fce891755ea782e50006
         run: |
           set -euo pipefail
-          mkdir -p .build-output
-          sudo chown 1000:1000 .build-output .cache/dl
+          mkdir -p .build-output .ci-cache/openwrt
+          sudo chown -R 1000:1000 .build-output .ci-cache/openwrt .cache/dl
           docker run --rm \
             --user root \
             --env BPF_LINKER_SHA256 \
             --env BPF_LINKER_VERSION \
             --env BPF_RUST_TOOLCHAIN \
             --env RUST_FEED_COMMIT \
+            --env SCCACHE_VERSION \
+            --env SCCACHE_SHA256 \
+            --env SDK_CACHE_DIR=/cache \
+            --env SCCACHE_CACHE_SIZE=768M \
             --volume "$GITHUB_WORKSPACE:/feed:ro" \
             --volume "$GITHUB_WORKSPACE/.build-output:/artifacts" \
+            --volume "$GITHUB_WORKSPACE/.ci-cache/openwrt:/cache" \
             "$SDK_IMAGE" \
             bash -lc '
               set -euo pipefail
               apt-get update
               apt-get install -y --no-install-recommends ca-certificates curl git zstd libclang-dev clang llvm libbpf-dev pkg-config cmake
+              mkdir -p /cache
+              chown -R buildbot:buildbot /cache /artifacts
               exec runuser --user buildbot -- \
                 env BPF_LINKER_SHA256="$BPF_LINKER_SHA256" \
                     BPF_LINKER_VERSION="$BPF_LINKER_VERSION" \
                     BPF_RUST_TOOLCHAIN="$BPF_RUST_TOOLCHAIN" \
                     RUST_FEED_COMMIT="$RUST_FEED_COMMIT" \
+                    SCCACHE_VERSION="$SCCACHE_VERSION" \
+                    SCCACHE_SHA256="$SCCACHE_SHA256" \
+                    SDK_CACHE_DIR="$SDK_CACHE_DIR" \
+                    SCCACHE_CACHE_SIZE="$SCCACHE_CACHE_SIZE" \
                     bash /feed/.github/scripts/build-packages-in-sdk.sh
             '
-          sudo chown -R "$(id -u):$(id -g)" .build-output
+          sudo chown -R "$(id -u):$(id -g)" .build-output .ci-cache/openwrt
 
       - name: Prepare artifacts
         shell: bash
@@ -166,6 +228,27 @@ jobs:
             cp "$package" "dist/${base}-${ARCH}-${SDK}.${PACKAGE_EXT}"
           done
           ls -lah dist
+
+      - name: Save SDK toolchain cache
+        if: success() && github.event_name != 'pull_request' && steps.sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            .ci-cache/openwrt/dl
+            .ci-cache/openwrt/sccache
+            .ci-cache/openwrt/rust-host
+          key: honk-sdk-toolchain-v1-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.sdk }}-${{ steps.sdk-cache-key.outputs.cache_identity }}
+
+      - name: Save shared Rust and BPF cache
+        if: success() && github.event_name != 'pull_request' && matrix.arch == 'x86_64' && matrix.sdk == 'openwrt-25.12' && steps.shared-tool-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            .ci-cache/openwrt/cargo
+            .ci-cache/openwrt/rustup
+            .ci-cache/openwrt/rust-feed
+            .ci-cache/openwrt/tool-downloads
+          key: honk-rust-bpf-v1-${{ runner.os }}-${{ steps.sdk-cache-key.outputs.shared_cache_identity }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7

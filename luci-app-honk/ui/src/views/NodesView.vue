@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ChevronDown, ChevronRight, Gauge, Link, Plus, RadioTower, RefreshCw, Trash2, Waypoints } from '@lucide/vue'
+import { ChevronDown, ChevronRight, Gauge, Link, Plus, RadioTower, RefreshCw, Trash2, Waypoints, X } from '@lucide/vue'
 import { api } from '../api'
 import { t } from '../i18n'
 import type { NodeDelay, RuntimeNodeItem, SourceItem, SourceKind, StateResponse } from '../types'
@@ -10,11 +10,13 @@ const emit = defineEmits<{ changed: []; notice: [message: string]; error: [messa
 const kind = ref<SourceKind>('node')
 const name = ref('')
 const url = ref('')
+const formOpen = ref(false)
 const busy = ref(false)
 const checkingAll = ref(false)
 const checkedCount = ref(0)
 const collapsedSubscriptions = ref<Record<string, boolean>>({})
 const delays = ref<Record<string, NodeDelay>>({})
+
 const allSources = computed(() => [
   ...(Array.isArray(props.state?.catalog?.nodes) ? props.state.catalog.nodes : []),
   ...(Array.isArray(props.state?.catalog?.subscriptions) ? props.state.catalog.subscriptions : []),
@@ -37,24 +39,28 @@ const nodes = computed(() => [
   ...runtimeNodes.value.map(item => ({ name: item.name, protocol: item.protocol, source: item.subscription })),
 ])
 
-function resultFor(name: string): NodeDelay {
-  return delays.value[name] || { status: 'idle' }
+function resultFor(nodeName: string): NodeDelay {
+  return delays.value[nodeName] || { status: 'idle' }
 }
 
-function resultTitle(name: string): string | undefined {
-  const result = resultFor(name)
+function resultTitle(nodeName: string): string | undefined {
+  const result = resultFor(nodeName)
   return result.status === 'error' ? result.error : undefined
 }
 
-function isSubscriptionCollapsed(name: string): boolean {
-  return collapsedSubscriptions.value[name] === true
+function isSubscriptionCollapsed(subscriptionName: string): boolean {
+  return collapsedSubscriptions.value[subscriptionName] !== false
 }
 
-function toggleSubscription(name: string) {
+function toggleSubscription(subscriptionName: string) {
   collapsedSubscriptions.value = {
     ...collapsedSubscriptions.value,
-    [name]: !isSubscriptionCollapsed(name),
+    [subscriptionName]: !isSubscriptionCollapsed(subscriptionName),
   }
+}
+
+function closeComposer() {
+  formOpen.value = false
 }
 
 async function checkNode(nodeName: string) {
@@ -95,6 +101,7 @@ async function mutate(action: string, itemName: string, itemUrl = '') {
     await api.mutateSource({ action, name: itemName, url: itemUrl, expectedRevision: props.state.revision })
     name.value = ''
     url.value = ''
+    formOpen.value = false
     emit('notice', t('updated'))
     emit('changed')
   } catch (reason) {
@@ -120,8 +127,6 @@ async function refreshSubscription(subscriptionName: string) {
   try {
     await api.refreshSubscription(subscriptionName)
     emit('notice', t('refreshSubscription'))
-    // The service refreshes asynchronously; sample the runtime catalog while the
-    // subscription fetch and control-plane merge finish.
     for (let attempt = 0; attempt < 4; attempt += 1) {
       await new Promise(resolve => window.setTimeout(resolve, 900))
       emit('changed')
@@ -135,75 +140,80 @@ async function refreshSubscription(subscriptionName: string) {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-heading"><span class="count-label">{{ allSources.length }}</span></header>
-    <div class="node-layout">
-      <section class="tool-panel source-form" aria-labelledby="add-source-heading">
-        <h2 id="add-source-heading">{{ kind === 'node' ? t('addNode') : t('addSubscription') }}</h2>
-        <div class="segmented" role="group" :aria-label="t('type')">
-          <button :class="{ active: kind === 'node' }" @click="kind = 'node'"><Waypoints :size="16" />{{ t('nodes') }}</button>
-          <button :class="{ active: kind === 'subscription' }" @click="kind = 'subscription'"><RadioTower :size="16" />{{ t('addSubscription') }}</button>
-        </div>
-        <label><span>{{ t('name') }}</span><input v-model="name" autocomplete="off" maxlength="64"></label>
-        <label><span>{{ t('link') }}</span><textarea v-model="url" rows="4" spellcheck="false" /></label>
-        <button class="primary-command" :disabled="busy || !name.trim() || !url.trim()" @click="addSource"><Plus :size="18" />{{ t('add') }}</button>
-      </section>
+  <div class="page nodes-page">
+    <header class="nodes-toolbar">
+      <div class="nodes-summary">
+        <span class="count-label">{{ allSources.length }}</span><span>{{ t('source') }}</span>
+        <span class="toolbar-divider" aria-hidden="true" />
+        <span class="count-label">{{ runtimeNodes.length }}</span><span>{{ t('subscriptionNodes') }}</span>
+      </div>
+      <div class="nodes-toolbar-actions">
+        <button class="secondary-button compact-command" type="button" :disabled="checkingAll || nodes.length === 0" @click="checkAll"><Gauge :size="16" />{{ checkingAll ? `${t('checkingLatency')} ${checkedCount}/${nodes.length}` : t('checkAllLatency') }}</button>
+        <button class="primary-command compact-command" type="button" :disabled="busy" @click="formOpen = !formOpen"><Plus :size="16" />{{ t('add') }}</button>
+      </div>
+    </header>
 
-      <section class="source-list" aria-live="polite">
-        <article v-for="item in allSources" :key="`${item.kind}:${item.name}`" class="source-row">
-          <span class="source-icon"><RadioTower v-if="item.kind === 'subscription'" :size="18" /><Waypoints v-else :size="18" /></span>
-          <div><strong>{{ item.name }}</strong><span>{{ item.kind }} · {{ item.protocol }}</span></div>
-          <span v-if="item.kind === 'subscription' && item.enabled === false" class="status-tag">off</span>
-          <span v-else-if="item.kind === 'node'" class="latency-tag" :class="`latency-${resultFor(item.name).status}`" :title="resultTitle(item.name)">
-            <RefreshCw v-if="resultFor(item.name).status === 'testing'" :size="14" class="spin" />
-            <template v-else-if="resultFor(item.name).status === 'ok'">{{ resultFor(item.name).delay }} ms</template>
-            <template v-else-if="resultFor(item.name).status === 'error'">{{ t('latencyFailed') }}</template>
-            <template v-else>—</template>
-          </span>
-          <div class="source-actions">
-            <button v-if="item.kind === 'subscription'" class="icon-button" :title="t('refreshSubscription')" :aria-label="`${t('refreshSubscription')} ${item.name}`" :disabled="busy" @click="refreshSubscription(item.name)"><RefreshCw :size="17" :class="{ spin: busy }" /></button>
-            <button v-if="item.kind === 'node'" class="icon-button" :title="t('checkLatency')" :aria-label="`${t('checkLatency')} ${item.name}`" :disabled="checkingAll || resultFor(item.name).status === 'testing'" @click="checkNode(item.name)"><Gauge :size="17" /></button>
-            <button class="icon-button danger" :title="t('remove')" :aria-label="`${t('remove')} ${item.name}`" :disabled="busy" @click="removeSource(item.kind, item.name)"><Trash2 :size="17" /></button>
-          </div>
-        </article>
-        <div v-if="allSources.length === 0" class="empty-state"><Link :size="22" /><p>{{ t('emptyNodes') }}</p></div>
-      </section>
-    </div>
+    <section v-if="formOpen" class="source-composer" :aria-labelledby="kind === 'node' ? 'add-node-heading' : 'add-subscription-heading'">
+      <div class="segmented composer-kind" role="group" :aria-label="t('type')">
+        <button type="button" :class="{ active: kind === 'node' }" :aria-pressed="kind === 'node'" @click="kind = 'node'"><Waypoints :size="16" />{{ t('nodes') }}</button>
+        <button type="button" :class="{ active: kind === 'subscription' }" :aria-pressed="kind === 'subscription'" @click="kind = 'subscription'"><RadioTower :size="16" />{{ t('addSubscription') }}</button>
+      </div>
+      <label class="composer-name"><span :id="kind === 'node' ? 'add-node-heading' : 'add-subscription-heading'">{{ t('name') }}</span><input v-model="name" autocomplete="off" maxlength="64" /></label>
+      <label class="composer-link"><span>{{ t('link') }}</span><input v-model="url" autocomplete="off" spellcheck="false" /></label>
+      <button class="primary-command compact-command" type="button" :disabled="busy || !name.trim() || !url.trim()" @click="addSource"><Plus :size="16" />{{ t('add') }}</button>
+      <button class="icon-button" type="button" :title="t('close')" :aria-label="t('close')" @click="closeComposer"><X :size="16" /></button>
+    </section>
+
+    <section class="source-table" aria-live="polite">
+      <article v-for="item in allSources" :key="`${item.kind}:${item.name}`" class="source-row horizontal-row">
+        <span class="source-icon"><RadioTower v-if="item.kind === 'subscription'" :size="17" /><Waypoints v-else :size="17" /></span>
+        <div class="source-identity"><strong>{{ item.name }}</strong><span>{{ item.kind }} · {{ item.protocol }}</span></div>
+        <span v-if="item.cacheSource" class="status-tag cache-source">{{ item.cacheSource === 'missing' ? t('missingCache') : (item.cacheSource === 'stale' ? t('staleCache') : t('cached')) }}</span>
+        <span v-else-if="item.kind === 'subscription' && item.enabled === false" class="status-tag">off</span>
+        <span v-else-if="item.kind === 'subscription' && item.cachedError" class="status-tag cache-error">{{ t('cacheError') }}</span>
+        <span v-else-if="item.kind === 'node'" class="latency-tag" :class="`latency-${resultFor(item.name).status}`" :title="resultTitle(item.name)">
+          <RefreshCw v-if="resultFor(item.name).status === 'testing'" :size="14" class="spin" />
+          <template v-else-if="resultFor(item.name).status === 'ok'">{{ resultFor(item.name).delay }} ms</template>
+          <template v-else-if="resultFor(item.name).status === 'error'">{{ t('latencyFailed') }}</template>
+          <template v-else>—</template>
+        </span>
+        <span v-else />
+        <div class="row-actions">
+          <button v-if="item.kind === 'subscription'" class="icon-button" type="button" :title="t('refreshSubscription')" :aria-label="`${t('refreshSubscription')} ${item.name}`" :disabled="busy" @click="refreshSubscription(item.name)"><RefreshCw :size="16" :class="{ spin: busy }" /></button>
+          <button v-if="item.kind === 'node'" class="icon-button" type="button" :title="t('checkLatency')" :aria-label="`${t('checkLatency')} ${item.name}`" :disabled="checkingAll || resultFor(item.name).status === 'testing'" @click="checkNode(item.name)"><Gauge :size="16" /></button>
+          <button class="icon-button danger" type="button" :title="t('remove')" :aria-label="`${t('remove')} ${item.name}`" :disabled="busy" @click="removeSource(item.kind, item.name)"><Trash2 :size="16" /></button>
+        </div>
+      </article>
+      <div v-if="allSources.length === 0" class="empty-state"><Link :size="22" /><p>{{ t('emptyNodes') }}</p></div>
+    </section>
 
     <section v-if="allSources.some(item => item.kind === 'subscription')" class="runtime-section" aria-labelledby="runtime-nodes-heading">
-      <header class="section-label">
-        <div><span>02</span><h2 id="runtime-nodes-heading">{{ t('subscriptionNodes') }}</h2></div>
-        <div class="section-tools">
-          <span class="count-label">{{ runtimeNodes.length }}</span>
-          <button class="secondary-button compact-command" :disabled="checkingAll || nodes.length === 0" @click="checkAll"><Gauge :size="16" />{{ checkingAll ? `${t('checkingLatency')} ${checkedCount}/${nodes.length}` : t('checkAllLatency') }}</button>
-        </div>
+      <header class="nodes-section-heading">
+        <div><h2 id="runtime-nodes-heading">{{ t('subscriptionNodes') }}</h2><span>{{ runtimeNodes.length }}</span></div>
       </header>
-      <div v-if="runtimeNodes.length" class="subscription-columns">
-        <section v-for="group in subscriptionGroups" :key="group.name" class="subscription-column" :aria-label="group.name">
-          <header class="subscription-column-heading">
-            <button class="subscription-column-toggle" type="button" :aria-expanded="!isSubscriptionCollapsed(group.name)" :aria-label="group.name" @click="toggleSubscription(group.name)">
-              <ChevronRight v-if="isSubscriptionCollapsed(group.name)" :size="17" />
-              <ChevronDown v-else :size="17" />
-              <RadioTower :size="17" />
-              <strong>{{ group.name }}</strong>
-              <span>{{ group.nodes.length }}</span>
+      <div v-if="subscriptionGroups.length" class="subscription-groups">
+        <section v-for="group in subscriptionGroups" :key="group.name" class="subscription-group" :class="{ collapsed: isSubscriptionCollapsed(group.name) }" :aria-label="group.name">
+          <header class="subscription-group-heading">
+            <button class="subscription-group-toggle" type="button" :aria-expanded="!isSubscriptionCollapsed(group.name)" :aria-label="group.name" @click="toggleSubscription(group.name)">
+              <ChevronRight v-if="isSubscriptionCollapsed(group.name)" :size="17" /><ChevronDown v-else :size="17" />
+              <RadioTower :size="17" /><strong>{{ group.name }}</strong><span>{{ group.nodes.length }}</span>
             </button>
-            <button v-if="group.source" class="icon-button" :title="t('refreshSubscription')" :aria-label="`${t('refreshSubscription')} ${group.source.name}`" :disabled="busy" @click="refreshSubscription(group.source.name)"><RefreshCw :size="16" :class="{ spin: busy }" /></button>
+            <button v-if="group.source" class="icon-button" type="button" :title="t('refreshSubscription')" :aria-label="`${t('refreshSubscription')} ${group.source.name}`" :disabled="busy" @click="refreshSubscription(group.source.name)"><RefreshCw :size="16" :class="{ spin: busy }" /></button>
           </header>
           <div v-if="!isSubscriptionCollapsed(group.name) && group.nodes.length" class="runtime-node-list">
-            <article v-for="item in group.nodes" :key="`${item.subscription}:${item.name}`" class="runtime-node-row">
-              <span class="source-icon"><Waypoints :size="18" /></span>
-              <div><strong>{{ item.name }}</strong><span>{{ item.protocol }}</span></div>
+            <article v-for="item in group.nodes" :key="`${item.subscription}:${item.name}`" class="runtime-node-row horizontal-row">
+              <span class="source-icon"><Waypoints :size="17" /></span>
+              <div class="source-identity"><strong>{{ item.name }}</strong><span>{{ item.protocol }}</span></div>
               <span class="latency-tag" :class="`latency-${resultFor(item.name).status}`" :title="resultTitle(item.name)">
                 <RefreshCw v-if="resultFor(item.name).status === 'testing'" :size="14" class="spin" />
                 <template v-else-if="resultFor(item.name).status === 'ok'">{{ resultFor(item.name).delay }} ms</template>
                 <template v-else-if="resultFor(item.name).status === 'error'">{{ t('latencyFailed') }}</template>
                 <template v-else>—</template>
               </span>
-              <button class="icon-button" :title="t('checkLatency')" :aria-label="`${t('checkLatency')} ${item.name}`" :disabled="checkingAll || resultFor(item.name).status === 'testing'" @click="checkNode(item.name)"><Gauge :size="17" /></button>
+              <div class="row-actions"><button class="icon-button" type="button" :title="t('checkLatency')" :aria-label="`${t('checkLatency')} ${item.name}`" :disabled="checkingAll || resultFor(item.name).status === 'testing'" @click="checkNode(item.name)"><Gauge :size="16" /></button></div>
             </article>
           </div>
-          <div v-else-if="!isSubscriptionCollapsed(group.name)" class="empty-state"><RadioTower :size="20" /><p>{{ state?.catalog?.runtimeConfigured ? (state?.running ? t('runtimeWaiting') : t('runtimeUnavailable')) : t('runtimeApiDisabled') }}</p></div>
+          <div v-else-if="!isSubscriptionCollapsed(group.name)" class="empty-state compact-empty"><RadioTower :size="19" /><p>{{ state?.catalog?.runtimeConfigured ? (state?.running ? t('runtimeWaiting') : t('runtimeUnavailable')) : t('runtimeApiDisabled') }}</p></div>
         </section>
       </div>
       <div v-else class="empty-state"><RadioTower :size="22" /><p>{{ state?.catalog?.runtimeAvailable ? t('emptyNodes') : (state?.catalog?.runtimeConfigured ? (state?.running ? t('runtimeWaiting') : t('runtimeUnavailable')) : t('runtimeApiDisabled')) }}</p></div>

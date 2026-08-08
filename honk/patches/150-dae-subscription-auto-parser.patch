@@ -1,0 +1,41 @@
+diff --git a/crates/honk-config/src/parser/mod.rs b/crates/honk-config/src/parser/mod.rs
+--- a/crates/honk-config/src/parser/mod.rs
++++ b/crates/honk-config/src/parser/mod.rs
+@@ -1504,6 +1504,7 @@ fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, cr
+             subs.push(Subscription {
+                 name: tag,
+                 url,
++                sub_type: crate::types::SubscriptionType::Custom,
+                 ..Default::default()
+             });
+         } else if trimmed.starts_with('\'') && trimmed.ends_with('\'') {
+@@ -1511,6 +1512,7 @@ fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, cr
+             subs.push(Subscription {
+                 name: url.clone(),
+                 url,
++                sub_type: crate::types::SubscriptionType::Custom,
+                 ..Default::default()
+             });
+         }
+@@ -1524,6 +1526,7 @@ fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, cr
+             name: entry.name,
+             url: url.clone(),
+             id: uuid::Uuid::new_v4(),
++            sub_type: crate::types::SubscriptionType::Custom,
+             ..Default::default()
+         };
+         if let Some(interval) = kv.get("update_interval") {
+diff --git a/crates/honk-config/src/parser/tests.rs b/crates/honk-config/src/parser/tests.rs
+--- a/crates/honk-config/src/parser/tests.rs
++++ b/crates/honk-config/src/parser/tests.rs
+@@ -355,6 +355,10 @@ group {
+         assert_eq!(config.subscriptions.len(), 1);
+         assert_eq!(config.subscriptions[0].update_interval, 3600);
+         assert!(!config.subscriptions[0].enabled);
++        assert_eq!(
++            config.subscriptions[0].sub_type,
++            crate::types::SubscriptionType::Custom
++        );
+
+         let node = crate::node::Node {
+             name: "remote-1".to_string(),

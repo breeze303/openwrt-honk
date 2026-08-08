@@ -7,6 +7,7 @@ local uci = require "luci.model.uci"
 local config = require "luci.model.config"
 local mode = require "luci.model.mode"
 local node = require "luci.model.node"
+local subscription = require "luci.model.subscription"
 local network = require "luci.model.honk_network"
 
 local M = {}
@@ -18,6 +19,8 @@ local ASSET_DIR = os.getenv("HONK_ASSET_DIR") or "/usr/share/honk"
 local GEO_DIR = os.getenv("HONK_GEO_DIR") or "/usr/lib/honk"
 local GEO_LOCK = ASSET_DIR .. "/geo.lock.json"
 local HEALTH_ATTEMPTS = tonumber(os.getenv("HONK_HEALTH_ATTEMPTS")) or 10
+local LOG_FILE = os.getenv("HONK_LOG_PATH") or "/tmp/honk/honk.log"
+local LOG_LEVELS = { trace = true, debug = true, info = true, warn = true, error = true }
 
 local ERROR_MESSAGES = {
 	MODE_UNKNOWN = "unknown routing mode",
@@ -55,6 +58,8 @@ local ERROR_MESSAGES = {
 	INTERFACE_NOT_AVAILABLE = "selected network interface is no longer available",
 	INTERFACE_SAME = "LAN and WAN must use different devices",
 	DIAL_MODE_INVALID = "dial mode is invalid",
+	LOG_LEVEL_INVALID = "log level is invalid",
+	LOG_CLEAR_FAILED = "Honk log could not be cleared",
 	NETWORK_DISCOVERY_FAILED = "network interface discovery failed",
 	GEO_KIND_INVALID = "Geo asset kind is invalid",
 	GEO_URL_INVALID = "Geo download URL is invalid",
@@ -359,6 +364,11 @@ function M.apply_content(candidate, expected_revision, metadata)
 			return error_result("WRITE_FAILED", replace_error, 500)
 		end
 		write_state({ stage = "service-transition", previousRevision = current_revision, candidateRevision = config.file_revision(), wasRunning = was_running, metadata = metadata or {} })
+		if metadata and metadata.noService == true then
+			local active = config.file_revision()
+			write_state({ stage = "committed", activeRevision = active, action = "none", rollback = false, metadata = metadata })
+			return { ok = true, applied = true, action = "none", revision = active, running = was_running, rollback = false }
+		end
 		local healthy, action = transition(was_running)
 		if healthy then
 			local active = config.file_revision()
@@ -419,9 +429,13 @@ function M.state(include_config)
 	local revision = config.file_revision()
 	local is_running = running()
 	local runtime = node.runtime_catalog(content)
-	catalog.subscriptionNodes = runtime.nodes
+	if runtime.available then subscription.capture_runtime(catalog, runtime.nodes) end
+	local cached_nodes = subscription.catalog(catalog)
+	catalog.subscriptionNodes = runtime.available and runtime.nodes or cached_nodes
+	catalog.cachedNodes = cached_nodes
 	catalog.runtimeAvailable = runtime.available
 	catalog.runtimeConfigured = runtime.configured
+	catalog.cacheAvailable = #cached_nodes > 0
 	local result = {
 		ok = true,
 		running = is_running,
@@ -497,6 +511,8 @@ function M.apply_interfaces(input)
 	local discovery = network.discover()
 	if not discovery.ok then return error_result("NETWORK_DISCOVERY_FAILED", discovery.error, 503, { discovery = discovery }) end
 	local current = network.current(content)
+	local log_level = config.trim(input.logLevel or current.logLevel or "info"):lower()
+	if not LOG_LEVELS[log_level] then return error_result("LOG_LEVEL_INVALID") end
 	local selected, selection_error = network.validate_selection(
 		discovery,
 		input.lanDevice or input.lan or current.lan,
@@ -504,6 +520,7 @@ function M.apply_interfaces(input)
 		input.dialMode or current.dialMode
 	)
 	if not selected then return error_result(selection_error, nil, 422, { discovery = discovery }) end
+	selected.logLevel = log_level
 	local candidate, update_error = network.update_global(content, selected)
 	if not candidate then return error_result("CONFIG_INVALID", update_error, 422) end
 	local result, status = M.apply_content(candidate, input.expectedRevision, {
@@ -511,10 +528,12 @@ function M.apply_interfaces(input)
 		lanDevice = selected.lan,
 		wanDevice = selected.wan,
 		dialMode = selected.dialMode,
+		logLevel = selected.logLevel,
 	})
 	if type(result) == "table" and result.ok then
 		result.interfaces = { lan = selected.lan, wan = selected.wan }
 		result.dialMode = selected.dialMode
+		result.logLevel = selected.logLevel
 		result.config = config.read()
 	end
 	return result, status
@@ -524,22 +543,67 @@ function M.mutate_source(input)
 	local content = config.read()
 	local candidate, mutation_error = node.mutate(content, input)
 	if not candidate then return error_result(mutation_error, nil, 400) end
-	return M.apply_content(candidate, input.expectedRevision, { type = "source", action = input.action, name = input.name })
+	local was_running = running()
+	local result, status = M.apply_content(candidate, input.expectedRevision, {
+		type = "source", action = input.action, name = input.name, noService = not was_running,
+	})
+	if type(result) == "table" and result.ok and input.action == "add-subscription" then
+		local added = node.catalog(candidate).subscriptions
+		for _, item in ipairs(added) do
+			if item.name == input.name then
+				local record, refresh_error = subscription.refresh(item.name, input.url)
+				result.cache = record or { source = "missing", error = refresh_error }
+				break
+			end
+		end
+	elseif type(result) == "table" and result.ok and input.action == "remove-subscription" then
+		subscription.remove(input.name)
+	end
+	return result, status
 end
 
 function M.refresh_subscription(input)
 	if type(input) ~= "table" or type(input.name) ~= "string" then
 		return error_result("SUBSCRIPTION_REFRESH_FAILED", nil, 400)
 	end
-	local catalog = node.catalog(config.read())
-	local found = false
+	local content = config.read()
+	local catalog = node.catalog(content)
+	local found
 	for _, item in ipairs(catalog.subscriptions) do
-		if item.name == input.name then found = true; break end
+		if item.name == input.name then found = item; break end
 	end
 	if not found then return error_result("SUBSCRIPTION_REFRESH_FAILED", "subscription not found", 404) end
-	local ok, detail = node.refresh_subscription(config.read(), input.name)
-	if not ok then return error_result("SUBSCRIPTION_REFRESH_FAILED", detail, 503) end
-	return { ok = true, accepted = true, name = input.name }
+	local url = node.subscription_url(content, found.name)
+	if not url then return error_result("SUBSCRIPTION_REFRESH_FAILED", "subscription URL is unavailable", 404) end
+	local record, refresh_error = subscription.refresh(found.name, url)
+	if not record then return error_result("SUBSCRIPTION_REFRESH_FAILED", refresh_error, 503) end
+	local runtime_ok, runtime_error = false, nil
+	if running() then runtime_ok, runtime_error = node.refresh_subscription(content, input.name) end
+	return {
+		ok = true,
+		accepted = true,
+		name = input.name,
+		cache = record,
+		runtimeRefresh = runtime_ok,
+		runtimeError = runtime_error,
+	}
+end
+
+function M.subscription_cache(input)
+	if type(input) ~= "table" or type(input.name) ~= "string" or input.name == "" then
+		return error_result("SUBSCRIPTION_REFRESH_FAILED", nil, 400)
+	end
+	local record = subscription.cache(input.name)
+	if not record then return error_result("SUBSCRIPTION_REFRESH_FAILED", "subscription cache not found", 404) end
+	return { ok = true, name = input.name, cache = record }
+end
+
+function M.delete_subscription_cache(input)
+	if type(input) ~= "table" or type(input.name) ~= "string" or input.name == "" then
+		return error_result("SUBSCRIPTION_REFRESH_FAILED", nil, 400)
+	end
+	if not subscription.remove(input.name) then return error_result("SUBSCRIPTION_REFRESH_FAILED", "invalid subscription name", 400) end
+	return { ok = true, name = input.name, removed = true }
 end
 
 function M.delay(input)
@@ -630,6 +694,11 @@ end
 
 function M.service(action)
 	if not ({ start = true, stop = true, restart = true })[action] then return error_result("SOURCE_ACTION_INVALID", "unsupported service action") end
+	if action ~= "start" then
+		local content = config.read()
+		local runtime = node.runtime_catalog(content)
+		if runtime.available then subscription.capture_runtime(node.catalog(content), runtime.nodes) end
+	end
 	local code = sys.call(config.shell_quote(INIT) .. " " .. action .. " >/dev/null 2>&1")
 	if code ~= 0 then return error_result("SERVICE_FAILED", "service action failed", 500) end
 	local healthy = action == "stop" and not running() or health_check()
@@ -836,9 +905,16 @@ local function localize_log_timestamps(value)
 end
 
 function M.logs()
-	local output = sys.exec("tail -n 300 /tmp/honk/honk.log 2>/dev/null") or ""
+	local output = sys.exec("tail -n 300 " .. config.shell_quote(LOG_FILE) .. " 2>/dev/null") or ""
 	local cleaned = clean_log_output(output)
 	return { ok = true, lines = config.redact(localize_log_timestamps(cleaned)) }
+end
+
+function M.clear_logs()
+	if not fs.access(LOG_FILE) then return { ok = true, cleared = false } end
+	if not fs.writefile(LOG_FILE, "") then return error_result("LOG_CLEAR_FAILED", nil, 500) end
+	fs.chmod(LOG_FILE, 640)
+	return { ok = true, cleared = true }
 end
 
 function M.diagnostics()

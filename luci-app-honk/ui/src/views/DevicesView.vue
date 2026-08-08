@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Laptop, Plus, Save, Trash2 } from '@lucide/vue'
+import { Laptop, Plus, Trash2 } from '@lucide/vue'
 import { api } from '../api'
 import { t } from '../i18n'
+import type { PageAction } from '../page-actions'
 import type { DeviceRule, ModeInput, StateResponse } from '../types'
 
 const props = defineProps<{ state: StateResponse | null }>()
-const emit = defineEmits<{ changed: []; notice: [message: string]; error: [message: string] }>()
+const emit = defineEmits<{ changed: []; notice: [message: string]; error: [message: string]; pageActions: [actions: PageAction[]] }>()
 const rules = ref<DeviceRule[]>([])
 const kind = ref<'ip' | 'mac'>('ip')
 const value = ref('')
@@ -52,6 +53,18 @@ async function save() {
     busy.value = false
   }
 }
+
+function publishPageActions() {
+  emit('pageActions', [{
+    id: 'save-device-rules',
+    label: t('saveRules'),
+    disabled: busy.value || !props.state?.mode || !selectedSource.value,
+    busy: busy.value,
+    run: save,
+  }])
+}
+
+watch([rules, busy, () => props.state?.revision, selectedSource], publishPageActions, { deep: true, immediate: true })
 </script>
 
 <template>
@@ -75,6 +88,5 @@ async function save() {
       </article>
       <div v-if="rules.length === 0" class="empty-state"><Laptop :size="22" /><p>{{ t('noRules') }}</p></div>
     </section>
-    <div class="sticky-actions"><button class="primary-command" :disabled="busy || !state?.mode || !selectedSource" @click="save"><Save :size="18" />{{ t('saveRules') }}</button></div>
   </div>
 </template>
