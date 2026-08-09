@@ -67,6 +67,7 @@ grep -F "pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)" "$rep
 grep -F "dip(geoip: private) -> direct" "$repo_root/luci-app-honk/luasrc/model/mode.lua" >/dev/null
 grep -F "direct-dns" "$repo_root/luci-app-honk/luasrc/model/dns.lua" >/dev/null
 grep -F "proxy-dns" "$repo_root/luci-app-honk/luasrc/model/dns.lua" >/dev/null
+grep -F "DEFAULT_BIND" "$repo_root/luci-app-honk/luasrc/model/dns.lua" >/dev/null
 grep -F "ADVANCED_TAKEOVER_REQUIRED" "$repo_root/luci-app-honk/luasrc/model/service.lua" >/dev/null
 grep -F "REVISION_CONFLICT" "$repo_root/luci-app-honk/luasrc/model/service.lua" >/dev/null
 grep -F "ROLLBACK" "$repo_root/luci-app-honk/luasrc/model/service.lua" >/dev/null
@@ -102,7 +103,7 @@ grep -F "LOG_LEVEL_INVALID" "$repo_root/luci-app-honk/luasrc/model/service.lua" 
 grep -F 'function M.clear_logs' "$repo_root/luci-app-honk/luasrc/model/service.lua" >/dev/null
 grep -F 'clearLogs' "$repo_root/luci-app-honk/ui/src/api.ts" >/dev/null
 grep -F 'logLevel' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null
-grep -F 'proxyLocalDns' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null
+grep -F 'dnsmasqForwarding' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null
 grep -F 'localDnsServers' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null
 if grep -F '127.0.0.2' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null; then fail "fixed host DNS listener remains in the UI"; fi
 grep -F 'clearLogs' "$repo_root/luci-app-honk/ui/src/views/LogsView.vue" >/dev/null

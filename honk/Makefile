@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
 PKG_VERSION:=0.0.1_git
-PKG_RELEASE:=17
+PKG_RELEASE:=18
 PKG_LICENSE:=GPL-3.0-only
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=Honk OpenWrt feed
@@ -44,6 +44,7 @@ define Package/honk/conffiles
 /etc/honk/config.dae
 /etc/honk/config.d/
 /etc/honk/subscriptions/
+/etc/honk/.sub/
 endef
 
 RUST_TARGET:=$(RUSTC_TARGET_ARCH)
@@ -81,7 +82,7 @@ define Build/Compile
 endef
 
 define Package/honk/install
-	$(INSTALL_DIR) $(1)/usr/bin $(1)/usr/libexec/honk $(1)/usr/lib/honk $(1)/usr/share/honk $(1)/etc/init.d $(1)/etc/config $(1)/etc/honk/config.d $(1)/etc/honk/subscriptions
+	$(INSTALL_DIR) $(1)/usr/bin $(1)/usr/libexec/honk $(1)/usr/lib/honk $(1)/usr/share/honk $(1)/etc/init.d $(1)/etc/config $(1)/etc/honk/config.d $(1)/etc/honk/subscriptions $(1)/etc/honk/.sub
 	$(INSTALL_BIN) $(HONK_CORE_BINARY) $(1)/usr/bin/honk-core
 	$(INSTALL_BIN) $(HONK_TOOL_BINARY) $(1)/usr/bin/honk-tool
 	$(INSTALL_DATA) $(GEO_SITE_CACHE) $(1)/usr/lib/honk/geosite.dat
@@ -91,6 +92,7 @@ define Package/honk/install
 	$(INSTALL_DATA) $(GEO_LOCK) $(1)/usr/share/honk/geo.lock.json
 	$(INSTALL_BIN) $(CURDIR)/files/honk.init $(1)/etc/init.d/honk
 	$(INSTALL_BIN) $(CURDIR)/files/honk-launcher $(1)/usr/libexec/honk/honk-launcher
+	$(INSTALL_BIN) $(CURDIR)/files/dnsmasq-integration $(1)/usr/libexec/honk/dnsmasq-integration
 	$(INSTALL_BIN) $(CURDIR)/files/quick-transaction-worker $(1)/usr/libexec/honk/quick-transaction-worker
 	$(INSTALL_BIN) $(CURDIR)/files/interface-discovery $(1)/usr/libexec/honk/interface-discovery
 	$(INSTALL_CONF) $(CURDIR)/files/honk.config $(1)/etc/config/honk

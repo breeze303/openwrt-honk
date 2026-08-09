@@ -1,0 +1,70 @@
+#!/bin/sh
+
+set -eu
+
+RUN_DIR=/run/honk
+STATE_FILE=$RUN_DIR/dnsmasq-forwarding.json
+OWNER=${2:-}
+
+dnsmasq_conf_dir() {
+	local section conf_dir
+	section="$(uci -q show 'dhcp.@dnsmasq[0]' 2>/dev/null | awk -F '[.=]' 'NR == 1 { print $2 }')"
+	if [ -z "$section" ]; then
+		logger -t honk 'no dnsmasq UCI instance is available for DNS forwarding'
+		return 1
+	fi
+	conf_dir="$(uci -q get "dhcp.$section.confdir" 2>/dev/null || true)"
+	[ -n "$conf_dir" ] || conf_dir="/tmp/dnsmasq.$section.d"
+	conf_dir="${conf_dir%%,*}"
+	case "$conf_dir" in
+		/*) printf '%s\n' "${conf_dir%/}" ;;
+		*) logger -t honk "dnsmasq confdir must be absolute: $conf_dir"; return 1 ;;
+	esac
+}
+
+restart_dnsmasq() {
+	[ -x /etc/init.d/dnsmasq ] || return 2
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+}
+
+write_state() {
+	local endpoint=$1 conf_dir=$2
+	mkdir -p "$RUN_DIR"
+	printf '{"schemaVersion":"honk.dnsmasq.v1","owner":"%s","endpoint":"%s","confDir":"%s","active":true}\n' \
+		"$OWNER" 127.0.0.1#1053 "$conf_dir" >"$STATE_FILE"
+	chmod 600 "$STATE_FILE"
+}
+
+enable() {
+	local conf_dir fragment temp_file
+	conf_dir="$(dnsmasq_conf_dir)"
+	fragment="$conf_dir/90-honk.conf"
+	temp_file="$fragment.tmp.$$"
+	mkdir -p "$conf_dir"
+	printf 'no-poll\nno-resolv\nserver=127.0.0.1#1053\n' >"$temp_file"
+	mv "$temp_file" "$fragment"
+	if ! restart_dnsmasq; then
+		rm -f "$fragment" "$STATE_FILE"
+		restart_dnsmasq || true
+		return 1
+	fi
+	write_state 127.0.0.1#1053 "$conf_dir"
+}
+
+disable() {
+	local conf_dir current_owner
+	[ -r "$STATE_FILE" ] || return 0
+	current_owner="$(sed -n 's/.*"owner":"\([^"]*\)".*/\1/p' "$STATE_FILE")"
+	[ -z "$OWNER" ] || [ "$current_owner" = "$OWNER" ] || return 0
+	conf_dir="$(sed -n 's/.*"confDir":"\([^"]*\)".*/\1/p' "$STATE_FILE")"
+	[ -n "$conf_dir" ] || conf_dir="$(dnsmasq_conf_dir)"
+	rm -f "$conf_dir/90-honk.conf" "$STATE_FILE"
+	restart_dnsmasq || true
+}
+
+case "${1:-}" in
+	enable) enable ;;
+	disable) disable ;;
+	status) [ -r "$STATE_FILE" ] && cat "$STATE_FILE" || printf '%s\n' '{"active":false}' ;;
+	*) printf 'usage: %s {enable|disable|status} [owner]\n' "$0" >&2; exit 64 ;;
+esac

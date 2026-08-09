@@ -206,6 +206,7 @@ function M.compile(content, input)
 	if not device_rules then return nil, device_error end
 	local current_dns = dns.current(content)
 	local dns_block, dns_error, dns_rules = dns.render(input.mode, {
+		bind = current_dns.bind,
 		direct = input.directDns or current_dns.direct,
 		proxy = input.proxyDns or current_dns.proxy,
 	})

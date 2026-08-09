@@ -36,7 +36,23 @@ esac
 printf '%s' "$source_commit" | grep -Eq '^[0-9a-f]{40}$'
 
 current_commit=$(jq -er '.source.commit' "$repo_root/locks/source.lock.json")
-if [ "$source_commit" = "$current_commit" ]; then
+locked_patch_count=$(jq -er '.source.patchDigests | length' "$repo_root/locks/source.lock.json")
+actual_patch_count=$(find "$repo_root/honk/patches" -maxdepth 1 -type f -name '*.patch' -printf . | wc -c)
+patches_current=true
+
+if [ "$locked_patch_count" -ne "$actual_patch_count" ]; then
+	patches_current=false
+else
+	while IFS=$'\t' read -r patch_path patch_sha; do
+		patch_file="$repo_root/$patch_path"
+		if [ ! -f "$patch_file" ] || [ "$(sha256sum "$patch_file" | cut -d ' ' -f 1)" != "$patch_sha" ]; then
+			patches_current=false
+			break
+		fi
+	done < <(jq -r '.source.patchDigests[] | [.path, .sha256] | @tsv' "$repo_root/locks/source.lock.json")
+fi
+
+if [ "$source_commit" = "$current_commit" ] && [ "$patches_current" = true ]; then
 	printf 'Honk source is current at %s\n' "$source_commit"
 	if [ -n "${GITHUB_OUTPUT:-}" ]; then printf 'changed=false\n' >>"$GITHUB_OUTPUT"; fi
 	exit 0

@@ -256,6 +256,7 @@ DNS 有独立的上游、请求路由和响应路由：
 
 ~~~dae
 dns {
+	bind: 'tcp+udp://127.0.0.1:1053'
     upstream {
         local: 'udp://223.5.5.5:53'
         remote: 'https://dns.google/dns-query' -> proxy
@@ -273,6 +274,8 @@ dns {
 ~~~
 
 支持的上游协议前缀为 udp://、tcp://、tcp+udp://、tls://、https://、h3:// 和 quic://。LuCI 表单可以编辑协议、主机、端口、路径、SNI 和出口。
+
+`dnsmasq_forwarding` 默认开启。Honk 在 `127.0.0.1:1053` 同时监听 TCP 和 UDP；启动器确认两种监听均就绪后，才临时写入 dnsmasq 的 `no-resolv` 和 `server=127.0.0.1#1053` 配置。这样路由器本机和 LAN 客户端的 DNS 都会进入 Honk 的 DNS 路由、缓存和上游选择链路，同时不会替换 `/etc/resolv.conf`。停止或核心异常退出时会删除临时配置并重启 dnsmasq；用户已有的域名专用 dnsmasq 规则保持不变。
 
 ## 日志与恢复
 

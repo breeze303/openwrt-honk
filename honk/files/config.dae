@@ -5,7 +5,8 @@ global {
 	dial_mode: domain
 	allow_insecure: false
 	auto_config_kernel_parameter: true
-	tcp_check_url: 'http://cp.cloudflare.com,1.1.1.1'
+	store_subscribe: true
+	tcp_check_url: 'http://connectivitycheck.platform.hicloud.com/generate_204'
 	tcp_check_http_method: HEAD
 	udp_check_dns: 'dns.google.com:53,8.8.8.8'
 	fallback_resolver: '8.8.8.8:53'
@@ -21,6 +22,7 @@ routing {
 }
 
 dns {
+	bind: 'tcp+udp://127.0.0.1:1053'
 	upstream {
 		alidns: 'udp://223.5.5.5:53'
 		googledns: 'tcp+udp://8.8.8.8:53'

@@ -180,29 +180,32 @@ end
 
 local function local_dns_settings()
 	local cursor = uci.cursor()
-	local enabled = cursor:get("honk", "main", "proxy_local_dns") ~= "0"
-	local path = config.trim(sys.exec("readlink -f /etc/resolv.conf 2>/dev/null") or "")
-	if path:sub(1, 1) ~= "/" then path = "/etc/resolv.conf" end
-	local active = sys.call("grep -F " .. config.shell_quote(" " .. path .. " ") .. " /proc/self/mountinfo >/dev/null 2>&1") == 0
-	local marker = config.RUN_DIR .. "/resolv-conf.honk"
-	local owned = active and fs.access(marker) and config.trim(fs.readfile(marker) or "") == "/tmp/resolv.conf.honk" or false
+	local configured = cursor:get("honk", "main", "dnsmasq_forwarding")
+	if configured == nil then configured = cursor:get("honk", "main", "proxy_local_dns") end
+	local state = jsonc.parse(fs.readfile(config.RUN_DIR .. "/dnsmasq-forwarding.json") or "") or {}
+	local path = "/etc/resolv.conf"
 	return {
-		enabled = enabled,
+		enabled = configured ~= "0",
 		servers = resolver_nameservers(path),
-		active = active,
-		owned = owned,
+		active = state.active == true,
+		owned = state.active == true and state.schemaVersion == "honk.dnsmasq.v1",
 		path = path,
+		endpoint = state.endpoint or "127.0.0.1#1053",
+		dnsmasq = state,
 	}
 end
 
 local function local_dns_input(input)
-	if input.proxyLocalDns ~= nil and type(input.proxyLocalDns) ~= "boolean" then return nil, "LOCAL_DNS_INVALID" end
-	return { enabled = input.proxyLocalDns ~= false }, nil
+	local value = input.dnsmasqForwarding
+	if value == nil then value = input.proxyLocalDns end
+	if value ~= nil and type(value) ~= "boolean" then return nil, "LOCAL_DNS_INVALID" end
+	return { enabled = value ~= false }, nil
 end
 
 local function write_local_dns_settings(settings)
 	local cursor = uci.cursor()
-	cursor:set("honk", "main", "proxy_local_dns", settings.enabled and "1" or "0")
+	cursor:set("honk", "main", "dnsmasq_forwarding", settings.enabled and "1" or "0")
+	cursor:delete("honk", "main", "proxy_local_dns")
 	cursor:delete("honk", "main", "local_dns_servers")
 	if not cursor:save("honk") or not cursor:commit("honk") then return false end
 	return true
@@ -580,7 +583,7 @@ function M.apply_interfaces(input)
 	if not selected then return error_result(selection_error, nil, 422, { discovery = discovery }) end
 	selected.logLevel = log_level
 	local local_dns
-	if input.proxyLocalDns ~= nil or input.localDnsServers ~= nil then
+	if input.dnsmasqForwarding ~= nil or input.proxyLocalDns ~= nil or input.localDnsServers ~= nil then
 		local_dns, selection_error = local_dns_input(input)
 		if not local_dns then return error_result(selection_error, nil, 422) end
 	end

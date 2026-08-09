@@ -4,6 +4,7 @@ local M = {}
 
 M.DEFAULT_DIRECT = "udp://223.5.5.5:53"
 M.DEFAULT_PROXY = "https://cloudflare-dns.com/dns-query"
+M.DEFAULT_BIND = "tcp+udp://127.0.0.1:1053"
 
 local function upstream_value(body, name)
 	local parsed = config.parse(body)
@@ -22,7 +23,9 @@ end
 function M.current(content)
 	local section = config.section(content, "dns")
 	local body = section and config.section_body(content, section) or ""
+	local values = config.key_values(body)
 	return {
+		bind = values.bind or M.DEFAULT_BIND,
 		direct = upstream_value(body, "direct-dns") or M.DEFAULT_DIRECT,
 		proxy = upstream_value(body, "proxy-dns") or M.DEFAULT_PROXY,
 	}
@@ -34,8 +37,10 @@ end
 
 function M.render(mode, options)
 	options = type(options) == "table" and options or {}
+	local bind = config.trim(options.bind or M.DEFAULT_BIND)
 	local direct = config.trim(options.direct or M.DEFAULT_DIRECT)
 	local proxy = config.trim(options.proxy or M.DEFAULT_PROXY)
+	if not valid_uri(bind) then return nil, "DNS_BIND_INVALID" end
 	if not valid_uri(direct) then return nil, "DIRECT_DNS_INVALID" end
 	if not valid_uri(proxy) then return nil, "PROXY_DNS_INVALID" end
 	local rules = {}
@@ -52,6 +57,7 @@ function M.render(mode, options)
 	end
 	local lines = {
 		"dns {",
+		"\tbind: " .. config.dae_quote(bind),
 		"\tupstream {",
 		"\t\tdirect-dns: " .. config.dae_quote(direct),
 		"\t\tproxy-dns: " .. config.dae_quote(proxy) .. " -> honk-proxy",

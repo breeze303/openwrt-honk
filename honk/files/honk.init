@@ -16,83 +16,7 @@ RUN_DIR=/run/honk
 ASSET_DIR=/usr/share/honk
 LIVE_RECEIPT=$RUN_DIR/geo-live.json
 ASSET_RECEIPT=$RUN_DIR/geo-assets.json
-RESOLV_TARGET="$(readlink -f /etc/resolv.conf 2>/dev/null)"
-[ -n "$RESOLV_TARGET" ] || RESOLV_TARGET=/etc/resolv.conf
-RESOLV_HONK=/tmp/resolv.conf.honk
-RESOLV_MARKER=$RUN_DIR/resolv-conf.honk
-
-resolv_mount_active() {
-	grep -q " $RESOLV_TARGET " /proc/self/mountinfo
-}
-
-resolv_mount_owned() {
-	[ -s "$RESOLV_MARKER" ] || return 1
-	[ "$(sed -n '1p' "$RESOLV_MARKER" 2>/dev/null)" = "$RESOLV_HONK" ] || return 1
-	grep -q " $RESOLV_TARGET " /proc/self/mountinfo
-}
-
-get_wan_dns_servers() {
-	local dns_list logical_wan
-	. /lib/functions/network.sh
-	network_find_wan logical_wan 2>/dev/null || true
-	if [ -n "$logical_wan" ]; then
-		dns_list="$(ubus call "network.interface.$logical_wan" status 2>/dev/null \
-			| jsonfilter -e '@["dns-server"][*]' 2>/dev/null)"
-	fi
-	if [ -z "$dns_list" ] && [ -r /tmp/resolv.conf.d/resolv.conf.auto ]; then
-		dns_list="$(awk '$1 == "nameserver" { print $2 }' /tmp/resolv.conf.d/resolv.conf.auto)"
-	fi
-	[ -n "$dns_list" ] || dns_list="119.29.29.29 223.5.5.5"
-	printf '%s\n' "$dns_list"
-}
-
-hijack_resolv_conf() {
-	if resolv_mount_active; then
-		if resolv_mount_owned; then
-			return 0
-		else
-			logger -t honk "refusing to replace resolver mounted by another service"
-			return 1
-		fi
-	fi
-
-	local dns dns_list source_file="$RESOLV_TARGET"
-	local temp_file="$RESOLV_HONK.tmp.$$"
-	dns_list="$(get_wan_dns_servers)" || return 1
-	[ -r "$source_file" ] || source_file=/etc/resolv.conf
-	: >"$temp_file" || return 1
-	grep -E '^(search|domain) ' "$source_file" >>"$temp_file" 2>/dev/null || true
-	for dns in $dns_list; do
-		printf 'nameserver %s\n' "$dns" >>"$temp_file"
-	done
-	mv "$temp_file" "$RESOLV_HONK" || { rm -f "$temp_file"; return 1; }
-	chmod 600 "$RESOLV_HONK"
-	mount --bind "$RESOLV_HONK" "$RESOLV_TARGET" || {
-		rm -f "$RESOLV_HONK"
-		return 1
-	}
-	mount -o remount,ro,bind "$RESOLV_TARGET" || {
-		umount "$RESOLV_TARGET" 2>/dev/null || true
-		rm -f "$RESOLV_HONK"
-		return 1
-	}
-	printf '%s\n' "$RESOLV_HONK" >"$RESOLV_MARKER"
-	chmod 600 "$RESOLV_MARKER"
-}
-
-restore_resolv_conf() {
-	if ! resolv_mount_active; then
-		rm -f "$RESOLV_HONK" "$RESOLV_MARKER"
-		return 0
-	fi
-	if ! resolv_mount_owned; then
-		logger -t honk "leaving resolver mount owned by another service untouched"
-		return 0
-	fi
-	mount -o remount,rw,bind "$RESOLV_TARGET" 2>/dev/null || true
-	umount "$RESOLV_TARGET" 2>/dev/null || return 1
-	rm -f "$RESOLV_HONK" "$RESOLV_MARKER"
-}
+DNSMASQ_HELPER=/usr/libexec/honk/dnsmasq-integration
 
 validate_config() {
 	[ -r "$CONFIG" ] || {
@@ -232,10 +156,12 @@ write_live_receipt() {
 }
 
 start_service() {
-	local respawn previous_pids SUBSCRIPTION_CACHE_TTL proxy_local_dns
+	local respawn previous_pids SUBSCRIPTION_CACHE_TTL dnsmasq_forwarding
 	config_load honk
 	config_get_bool respawn main respawn 1
-	config_get_bool proxy_local_dns main proxy_local_dns 1
+	config_get dnsmasq_forwarding main dnsmasq_forwarding ""
+	[ -n "$dnsmasq_forwarding" ] || config_get dnsmasq_forwarding main proxy_local_dns 1
+	case "$dnsmasq_forwarding" in 0|1) ;; *) dnsmasq_forwarding=1 ;; esac
 	config_get_bool ALLOW_CUSTOM_GEO main allow_custom_geo 0
 	config_get SUBSCRIPTION_CACHE_TTL main subscription_cache_ttl 604800
 	case "$SUBSCRIPTION_CACHE_TTL" in
@@ -280,13 +206,8 @@ start_service() {
 	mkdir -p "$LOG_DIR" || return 1
 	touch "$LOG_FILE" || return 1
 	chmod 640 "$LOG_FILE"
-	if [ "$proxy_local_dns" -eq 1 ]; then
-		hijack_resolv_conf || {
-			logger -t honk "failed to install WAN resolver configuration"
-			return 1
-		}
-	else
-		restore_resolv_conf || logger -t honk "failed to restore resolver configuration"
+	if [ "$dnsmasq_forwarding" -eq 0 ] && [ -x "$DNSMASQ_HELPER" ]; then
+		"$DNSMASQ_HELPER" disable || logger -t honk "failed to disable dnsmasq forwarding"
 	fi
 
 	procd_open_instance "$NAME"
@@ -295,7 +216,7 @@ start_service() {
 	# one call so a later value does not overwrite the preceding table.
 	procd_set_param env \
 		"DAE_LOCATION_ASSET=$ASSET_DIR" \
-		"HONK_SUBSCRIPTION_CACHE_DIR=/etc/honk/subscriptions" \
+		"HONK_DNSMASQ_FORWARDING=$dnsmasq_forwarding" \
 		"HONK_SUBSCRIPTION_CACHE_TTL=$SUBSCRIPTION_CACHE_TTL"
 	[ "$respawn" -eq 1 ] && procd_set_param respawn 3600 5 5
 	procd_set_param limits nofile="65536 65536"
@@ -313,7 +234,7 @@ start_service() {
 stop_service() {
 	# Honk owns and cleans its TC/eBPF resources during shutdown.
 	rm -f "$LIVE_RECEIPT"
-	restore_resolv_conf || logger -t honk "failed to restore resolver configuration"
+	[ -x "$DNSMASQ_HELPER" ] && "$DNSMASQ_HELPER" disable || logger -t honk "failed to disable dnsmasq forwarding"
 	return 0
 }
 

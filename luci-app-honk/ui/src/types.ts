@@ -101,7 +101,7 @@ export type StateResponse = {
   rollback: boolean
   backupAvailable: boolean
   clashApi: { enabled: boolean; controller: string; port?: number; secretConfigured: boolean }
-  localDns: { enabled: boolean; servers: string; active: boolean; owned: boolean; path: string }
+  localDns: { enabled: boolean; servers: string; active: boolean; owned: boolean; path: string; endpoint?: string; dnsmasq?: Record<string, unknown> }
   config?: string
 }
 

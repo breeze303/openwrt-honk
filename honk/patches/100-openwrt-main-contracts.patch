@@ -1,85 +1,22 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 75fc3eb..a50cf50 100644
+index 929f175..4d2758e 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -1657,6 +1657,8 @@ dependencies = [
+@@ -1656,6 +1656,8 @@ dependencies = [
+  "honk-ebpf-common",
   "honk-outbound",
   "libc",
-  "tempfile",
 + "serde_json",
 + "sha2 0.11.0",
+  "tempfile",
   "tokio",
   "tracing",
-  "tracing-subscriber",
 diff --git a/crates/honk-config/src/parser/mod.rs b/crates/honk-config/src/parser/mod.rs
-index 0c2011c..8fbdda9 100644
+index c37ee32..1ce125f 100644
 --- a/crates/honk-config/src/parser/mod.rs
 +++ b/crates/honk-config/src/parser/mod.rs
-@@ -400,7 +400,11 @@ pub fn parse_dae_config(input: &str) -> Result<Config, crate::ConfigError> {
-         }
-     }
- 
--    resolve_group_filters(&mut config.groups, &config.nodes);
-+    resolve_group_filters_with_subscriptions(
-+        &mut config.groups,
-+        &config.nodes,
-+        &config.subscriptions,
-+    );
- 
-     Ok(config)
- }
-@@ -408,13 +412,25 @@ pub fn parse_dae_config(input: &str) -> Result<Config, crate::ConfigError> {
- /// Resolve group filters into concrete node UUIDs.
- ///
- /// Supports `name('pattern')` where `pattern` is a regular expression matched
--/// against the node name. This lets groups include static nodes as well as
--/// nodes added dynamically (for example, from a fetched subscription).
-+/// against the node name and `subscription('tag')` for dynamically fetched
-+/// nodes belonging to a subscription. This lets groups include static nodes
-+/// as well as nodes added dynamically (for example, from a fetched
-+/// subscription).
- ///
- /// `group('tag')` entries are not node filters — the dae parser routes them
- /// into `Group.groups` (nested sub-groups) at parse time; any that still end
- /// up here are ignored by node-filter resolution.
- pub fn resolve_group_filters(groups: &mut [Group], nodes: &[Node]) {
-+    resolve_group_filters_with_subscriptions(groups, nodes, &[]);
-+}
-+
-+/// Resolve group filters with subscription tags available. The two-argument
-+/// wrapper above remains for callers that only have static nodes.
-+pub fn resolve_group_filters_with_subscriptions(
-+    groups: &mut [Group],
-+    nodes: &[Node],
-+    subscriptions: &[Subscription],
-+) {
-     for group in groups {
-         let filters: Vec<&str> = group
-             .filters
-@@ -437,6 +453,21 @@ pub fn resolve_group_filters(groups: &mut [Group], nodes: &[Node]) {
-         }
- 
-         for filter in &filters {
-+            if let Some(tags) = extract_fn_args(filter, "subscription") {
-+                let ids: Vec<_> = subscriptions
-+                    .iter()
-+                    .filter(|subscription| tags.iter().any(|tag| tag == &subscription.name))
-+                    .map(|subscription| subscription.id)
-+                    .collect();
-+                for node in nodes {
-+                    if node.subscription_id.is_some_and(|id| ids.contains(&id))
-+                        && !group.nodes.contains(&node.id)
-+                    {
-+                        group.nodes.push(node.id);
-+                    }
-+                }
-+                continue;
-+            }
-             let re = parse_name_filter(filter);
-             let Some(re) = re else { continue };
-             for node in nodes {
-@@ -1456,7 +1487,13 @@ fn parse_group_policy(policy: &str) -> crate::group::GroupPolicy {
- 
+@@ -1664,7 +1664,13 @@ fn parse_group_policy(policy: &str) -> crate::group::GroupPolicy {
+
  fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, crate::ConfigError> {
      let mut subs = Vec::new();
 -    for line in section.body.lines() {
@@ -93,7 +30,7 @@ index 0c2011c..8fbdda9 100644
          let trimmed = line.trim();
          if trimmed.is_empty() || trimmed.starts_with('#') {
              continue;
-@@ -1478,6 +1515,25 @@ fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, cr
+@@ -1686,6 +1692,25 @@ fn parse_subscription_section(section: &Section) -> Result<Vec<Subscription>, cr
              });
          }
      }
@@ -118,81 +55,12 @@ index 0c2011c..8fbdda9 100644
 +    }
      Ok(subs)
  }
- 
-diff --git a/crates/honk-config/src/parser/tests.rs b/crates/honk-config/src/parser/tests.rs
-index 46c9fe5..c14effe 100644
---- a/crates/honk-config/src/parser/tests.rs
-+++ b/crates/honk-config/src/parser/tests.rs
-@@ -334,6 +334,42 @@ subscription {
-         assert_eq!(config.subscriptions.len(), 2);
-     }
- 
-+    #[test]
-+    fn test_parse_subscription_options_and_filter() {
-+        let input = r#"
-+subscription {
-+    remote {
-+        url: 'https://example.com/sub'
-+        update_interval: 3600
-+        enabled: false
-+    }
-+}
-+group {
-+    remote {
-+        filter: subscription('remote')
-+        policy: selector
-+    }
-+}
-+"#;
-+        let mut config = parse_dae_config(input).unwrap();
-+        assert_eq!(config.subscriptions.len(), 1);
-+        assert_eq!(config.subscriptions[0].update_interval, 3600);
-+        assert!(!config.subscriptions[0].enabled);
-+
-+        let node = crate::node::Node {
-+            name: "remote-1".to_string(),
-+            subscription_id: Some(config.subscriptions[0].id),
-+            ..Default::default()
-+        };
-+        config.nodes.push(node.clone());
-+        crate::parser::resolve_group_filters_with_subscriptions(
-+            &mut config.groups,
-+            &config.nodes,
-+            &config.subscriptions,
-+        );
-+        assert_eq!(config.groups[0].nodes, vec![node.id]);
-+    }
-+
-     #[test]
-     fn test_parse_full_global() {
-         let input = r#"
+
 diff --git a/crates/honk-config/src/share_link.rs b/crates/honk-config/src/share_link.rs
-index c21c01d..886d302 100644
+index 945955d..0c373a5 100644
 --- a/crates/honk-config/src/share_link.rs
 +++ b/crates/honk-config/src/share_link.rs
-@@ -103,8 +103,10 @@ impl Node {
-             // URI userinfo field, not the password field.  Copy it to
-             // `password` so the protocol handler can build the correct request
-             // header.
--            if matches!(protocol, NodeProtocol::Trojan | NodeProtocol::AnyTLS)
--                && node.password.is_none()
-+            if matches!(
-+                protocol,
-+                NodeProtocol::Trojan | NodeProtocol::VLess | NodeProtocol::AnyTLS
-+            ) && node.password.is_none()
-                 && !url.username().is_empty()
-             {
-                 node.password = Some(percent_decode_str(url.username()));
-@@ -144,7 +146,7 @@ impl Node {
-         // Trojan transport options.  `alpn` is accepted for
-         // compatibility but intentionally not stored.
-         let mut host_consumed = false;
--        if protocol == NodeProtocol::Trojan {
-+        if matches!(protocol, NodeProtocol::Trojan | NodeProtocol::VLess) {
-             match node.transport.as_str() {
-                 "ws" => {
-                     if let Some(v) = query.get("host") {
-@@ -152,7 +154,7 @@ impl Node {
+@@ -164,7 +164,7 @@ impl Node {
                          host_consumed = true;
                      }
                      if let Some(v) = query.get("path") {
@@ -201,7 +69,7 @@ index c21c01d..886d302 100644
                      }
                  }
                  "grpc" => {
-@@ -196,8 +198,8 @@ impl Node {
+@@ -208,8 +208,8 @@ impl Node {
          if let Some(v) = query.get("ech_config").or_else(|| query.get("echconfig")) {
              node.ech_enabled = true;
              node.ech_config = Some(v.clone());
@@ -210,12 +78,12 @@ index c21c01d..886d302 100644
 +        } else if query.get("ech").is_some_and(|v| !v.is_empty()) {
 +            node.ech_enabled = true;
          }
- 
+
          if let Some(v) = query.get("plugin") {
-@@ -325,6 +327,21 @@ impl Node {
+@@ -353,6 +353,21 @@ impl Node {
      }
  }
- 
+
 +fn strip_ws_early_data(path: &str) -> String {
 +    let Some((base, params)) = path.split_once('?') else {
 +        return path.to_string();
@@ -235,7 +103,7 @@ index c21c01d..886d302 100644
  fn parse_vmess_link(link: &str, payload: &str) -> Result<Node, ConfigError> {
      let raw = base64_decode_flexible(payload).ok_or_else(|| {
 diff --git a/crates/honk-config/src/subscription.rs b/crates/honk-config/src/subscription.rs
-index db1d316..1930f1a 100644
+index a29588f..29cbeea 100644
 --- a/crates/honk-config/src/subscription.rs
 +++ b/crates/honk-config/src/subscription.rs
 @@ -27,6 +27,10 @@ pub struct Subscription {
@@ -249,28 +117,28 @@ index db1d316..1930f1a 100644
      /// Created at
      #[serde(default = "Utc::now")]
      pub created_at: DateTime<Utc>,
+@@ -49,6 +53,7 @@ impl Default for Subscription {
+             enabled: true,
+             last_updated: None,
+             node_count: 0,
++            last_error: None,
+             created_at: Utc::now(),
+         }
+     }
 diff --git a/crates/honk-core/src/clash_api.rs b/crates/honk-core/src/clash_api.rs
-index b728ea8..16e103d 100644
+index 8b29f5f..779f189 100644
 --- a/crates/honk-core/src/clash_api.rs
 +++ b/crates/honk-core/src/clash_api.rs
-@@ -35,6 +35,7 @@ use honk_outbound::group::{GroupManager, SharedGroupManager};
- use honk_outbound::urltest::{urltest_group, urltest_node};
- use std::sync::{Arc, Weak};
- use std::time::Duration;
-+use tokio::sync::mpsc;
- 
- const STREAM_CHANNEL_CAPACITY: usize = 16;
- const CONNECTION_INTERVAL_BUCKETS_MS: [u64; 9] =
-@@ -110,6 +111,8 @@ pub struct ClashState {
+@@ -109,6 +109,8 @@ pub struct ClashState {
      pub dns_service: crate::dns::DnsService,
      /// Shared lazy samplers for high-fanout websocket/HTTP streams.
      pub stream_samplers: Arc<StreamSamplers>,
 +    /// Control-plane command channel used by manual subscription refreshes.
 +    pub command_tx: mpsc::Sender<crate::control::ControlCommand>,
  }
- 
+
  pub fn router(state: Arc<ClashState>) -> Router {
-@@ -139,6 +142,8 @@ pub fn router(state: Arc<ClashState>) -> Router {
+@@ -138,6 +140,8 @@ pub fn router(state: Arc<ClashState>) -> Router {
          .route("/cache/dns/flush", post(flush_dns))
          .route("/providers/proxies", get(get_proxy_providers))
          .route("/providers/rules", get(get_rule_providers))
@@ -279,10 +147,10 @@ index b728ea8..16e103d 100644
          .route_layer(middleware::from_fn_with_state(
              state.clone(),
              auth_middleware,
-@@ -182,6 +187,92 @@ pub fn router(state: Arc<ClashState>) -> Router {
+@@ -181,6 +185,92 @@ pub fn router(state: Arc<ClashState>) -> Router {
          .with_state(state)
  }
- 
+
 +async fn get_subscriptions(State(s): State<Arc<ClashState>>) -> Json<serde_json::Value> {
 +    let config = s.config.read().await;
 +    let subscriptions = config
@@ -373,13 +241,13 @@ index b728ea8..16e103d 100644
      let app = router(state);
      let listener = match tokio::net::TcpListener::bind(listen).await {
 diff --git a/crates/honk-core/src/control/connection.rs b/crates/honk-core/src/control/connection.rs
-index 75ca99a..4d1536f 100644
+index f229676..628ed85 100644
 --- a/crates/honk-core/src/control/connection.rs
 +++ b/crates/honk-core/src/control/connection.rs
-@@ -248,14 +248,13 @@ impl ControlPlaneHandle {
+@@ -443,14 +443,13 @@ impl ControlPlaneHandle {
          }
      }
- 
+
 -    /// Clash mode override (approximate clash semantics), applied after the
 -    /// eBPF handoff / userspace Router produced an outbound and before
 -    /// `resolve_outbound_nodes`:
@@ -396,7 +264,7 @@ index 75ca99a..4d1536f 100644
      /// - `block` results and `must` results (dae `(must)` rules / eBPF
      ///   handoff must flag) are never overridden — both are final routing
      ///   decisions that mode switches must not bypass.
-@@ -267,10 +266,10 @@ impl ControlPlaneHandle {
+@@ -462,10 +461,10 @@ impl ControlPlaneHandle {
              return outbound_name;
          }
          let state = { mode_state.read().clone() };
@@ -410,7 +278,7 @@ index 75ca99a..4d1536f 100644
              let selection = &state.global_selection;
              selection_resolvable = *selection == "direct" || *selection == "block" || {
                  let config = self.config.read().await;
-@@ -279,7 +278,7 @@ impl ControlPlaneHandle {
+@@ -474,7 +473,7 @@ impl ControlPlaneHandle {
              };
              if !selection_resolvable {
                  debug!(
@@ -419,37 +287,23 @@ index 75ca99a..4d1536f 100644
                      selection, outbound_name
                  );
              }
-@@ -477,9 +476,8 @@ impl ControlPlaneHandle {
+@@ -657,9 +656,8 @@ impl ControlPlaneHandle {
                  .map(|m| (m.rule_type.to_string(), m.rule_payload.to_string()))
          };
- 
+
 -        // Clash mode override (Direct/Global); no-op when the clash API is
 -        // disabled or mode is Rule. Must-rule and block results are never
 -        // overridden.
 +        // Clash primary-node override. Direct, must-rule, and block results
 +        // retain their dedicated routing semantics.
          let outbound_name = self.apply_mode_override(outbound_name, must).await;
- 
+
          // For userspace-routed flows with a sniffed domain, write the resolved
 diff --git a/crates/honk-core/src/control/mod.rs b/crates/honk-core/src/control/mod.rs
-index 33033c9..20fcf03 100644
+index 2d21860..86d5333 100644
 --- a/crates/honk-core/src/control/mod.rs
 +++ b/crates/honk-core/src/control/mod.rs
-@@ -81,6 +81,13 @@ pub mod commands {
-             name: String,
-             nodes: Vec<Node>,
-         },
-+        /// Record a failed subscription refresh while keeping its last good
-+        /// node set active.
-+        SubscriptionError {
-+            subscription_id: uuid::Uuid,
-+            name: String,
-+            error: String,
-+        },
-         Shutdown,
-         GetStats(mpsc::Sender<super::StatsSnapshot>),
-     }
-@@ -464,7 +471,21 @@ impl ControlPlane {
+@@ -475,7 +475,21 @@ impl ControlPlane {
                      hook
                  };
              alive_set.set_resolver(make_hook(controller.clone()));
@@ -470,179 +324,49 @@ index 33033c9..20fcf03 100644
 +                })
 +            }));
          }
- 
+
          let control_plane = Self {
-@@ -1310,6 +1331,18 @@ impl ControlPlane {
-                             // both commands queue on this single channel.
-                             let _ = self.apply_runtime_config(new_config, &drain).await;
-                         }
-+                        Some(ControlCommand::SubscriptionError { subscription_id, name, error }) => {
-+                            let mut config = self.config.write().await;
-+                            if let Some(subscription) = config
-+                                .subscriptions
-+                                .iter_mut()
-+                                .find(|subscription| subscription.id == subscription_id)
-+                            {
-+                                subscription.last_error = Some(error);
-+                            } else {
-+                                warn!("Subscription '{}' is no longer configured", name);
-+                            }
-+                        }
-                         Some(ControlCommand::GetStats(tx)) => {
-                             let snap = self.stats.snapshot();
-                             let total = snap.values().map(|s| s.total_conns as u64).sum();
-diff --git a/crates/honk-core/src/control/reload.rs b/crates/honk-core/src/control/reload.rs
-index 4b6d704..257ab23 100644
---- a/crates/honk-core/src/control/reload.rs
-+++ b/crates/honk-core/src/control/reload.rs
-@@ -745,6 +745,20 @@ pub(super) fn config_with_subscription_nodes(
-         .nodes
-         .retain(|n| n.subscription_id != Some(subscription_id));
-     config.nodes.extend(nodes);
-+    let subscription_node_count = config
-+        .nodes
-+        .iter()
-+        .filter(|node| node.subscription_id == Some(subscription_id))
-+        .count() as u32;
-+    if let Some(subscription) = config
-+        .subscriptions
-+        .iter_mut()
-+        .find(|subscription| subscription.id == subscription_id)
-+    {
-+        subscription.node_count = subscription_node_count;
-+        subscription.last_updated = Some(chrono::Utc::now());
-+        subscription.last_error = None;
-+    }
-     // Group membership is filter-derived state: drop dangling IDs left
-     // behind by replaced subscription nodes (refreshed parses mint fresh
-     // UUIDs), then re-resolve filters against the merged node set.
-@@ -752,7 +766,11 @@ pub(super) fn config_with_subscription_nodes(
-     for group in &mut config.groups {
-         group.nodes.retain(|id| live.contains(id));
-     }
--    honk_config::parser::resolve_group_filters(&mut config.groups, &config.nodes);
-+    honk_config::parser::resolve_group_filters_with_subscriptions(
-+        &mut config.groups,
-+        &config.nodes,
-+        &config.subscriptions,
-+    );
-     config
- }
- 
-diff --git a/crates/honk-core/src/ebpf/real/attach.rs b/crates/honk-core/src/ebpf/real/attach.rs
-index 5949624..90adb09 100644
---- a/crates/honk-core/src/ebpf/real/attach.rs
-+++ b/crates/honk-core/src/ebpf/real/attach.rs
-@@ -433,21 +433,28 @@ impl RealEbpfBackend {
-                     slave_prog, slave
-                 );
- 
--                let egress_result: anyhow::Result<()> = (|| {
--                    let p: &mut aya::programs::SchedClassifier = bpf
--                        .program_mut("lan_egress_l2")
--                        .ok_or_else(|| anyhow::anyhow!("lan_egress_l2 program disappeared"))?
--                        .try_into()?;
--                    let id = p
--                        .attach(slave, egress_dir)
--                        .map_err(|e| anyhow::anyhow!("attach lan_egress_l2 to {}: {}", slave, e))?;
--                    dynamic_links.push((Self::iface_ifindex(slave), true, p.take_link(id)?));
--                    Ok(())
--                })();
--                egress_result.map_err(|e| {
--                    anyhow::anyhow!("attach lan_egress_l2 to bridge slave {}: {}", slave, e)
--                })?;
--                info!("attached lan_egress_l2 to bridge slave {} (Egress)", slave);
-+                if !single_homed {
-+                    let egress_result: anyhow::Result<()> = (|| {
-+                        let p: &mut aya::programs::SchedClassifier = bpf
-+                            .program_mut("lan_egress_l2")
-+                            .ok_or_else(|| anyhow::anyhow!("lan_egress_l2 program disappeared"))?
-+                            .try_into()?;
-+                        let id = p.attach(slave, egress_dir).map_err(|e| {
-+                            anyhow::anyhow!("attach lan_egress_l2 to {}: {}", slave, e)
-+                        })?;
-+                        dynamic_links.push((Self::iface_ifindex(slave), true, p.take_link(id)?));
-+                        Ok(())
-+                    })();
-+                    match egress_result {
-+                        Ok(()) => {
-+                            info!("attached lan_egress_l2 to bridge slave {} (Egress)", slave)
-+                        }
-+                        Err(e) => warn!(
-+                            "failed to attach lan_egress_l2 to bridge slave {}: {}",
-+                            slave, e
-+                        ),
-+                    }
-+                }
-             }
-         }
- 
-diff --git a/crates/honk-core/src/ebpf/real/iface_watch.rs b/crates/honk-core/src/ebpf/real/iface_watch.rs
-index 93c2d87..568538f 100644
---- a/crates/honk-core/src/ebpf/real/iface_watch.rs
-+++ b/crates/honk-core/src/ebpf/real/iface_watch.rs
-@@ -196,10 +196,14 @@ async fn reconcile(
-             ingress: false,
-             egress: true,
-         },
--        _ => DynamicHooks {
-+        IfaceRole::Wan | IfaceRole::LanBondSlave => DynamicHooks {
-             ingress: true,
-             egress: true,
-         },
-+        IfaceRole::LanBridgeSlave => DynamicHooks {
-+            ingress: true,
-+            egress: !single_homed,
-+        },
-     };
-     let mut backend = ebpf.write().await;
-     // Forget tracked entries that vanished, were recreated (their hooks
 diff --git a/crates/honk-core/src/lib.rs b/crates/honk-core/src/lib.rs
-index 71bc7cb..7b47e82 100644
+index 30614b7..6a725a8 100644
 --- a/crates/honk-core/src/lib.rs
 +++ b/crates/honk-core/src/lib.rs
-@@ -430,10 +430,27 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
-                     match result {
-                         Some((sub, Ok(nodes))) => {
-                             info!("Subscription '{}' fetched {} nodes", sub.name, nodes.len());
-+                            let node_count = nodes.len() as u32;
-                             config.nodes.extend(nodes);
-+                            if let Some(current) = config
-+                                .subscriptions
-+                                .iter_mut()
-+                                .find(|current| current.id == sub.id)
-+                            {
-+                                current.node_count = node_count;
-+                                current.last_updated = Some(chrono::Utc::now());
-+                                current.last_error = None;
-+                            }
-                         }
-                         Some((sub, Err(e))) => {
-                             warn!("Failed to fetch subscription '{}': {}", sub.name, e);
-+                            if let Some(current) = config
-+                                .subscriptions
-+                                .iter_mut()
-+                                .find(|current| current.id == sub.id)
-+                            {
-+                                current.last_error = Some(e.to_string());
-+                            }
-                         }
-                         None => break,
-                     }
-@@ -468,7 +485,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
-     // defined with `filter:` (or with no filter at all, meaning "all nodes")
-     // would otherwise end up with an empty member list for static configs.
-     // The merge is idempotent (existing IDs are kept, no duplicates).
--    honk_config::parser::resolve_group_filters(&mut config.groups, &config.nodes);
-+    honk_config::parser::resolve_group_filters_with_subscriptions(
-+        &mut config.groups,
-+        &config.nodes,
-+        &config.subscriptions,
+@@ -311,6 +311,21 @@ fn acquire_instance_lock(
+ }
+
+ pub async fn run(cli: Cli) -> anyhow::Result<()> {
++    struct OpenWrtLocalTimer;
++
++    impl tracing_subscriber::fmt::time::FormatTime for OpenWrtLocalTimer {
++        fn format_time(
++            &self,
++            writer: &mut tracing_subscriber::fmt::format::Writer<'_>,
++        ) -> std::fmt::Result {
++            write!(
++                writer,
++                "{}",
++                chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
++            )
++        }
++    }
++
+     // Load the configuration before initializing logging so `log_level` in
+     // the config file is honored (previously only --debug/RUST_LOG had any
+     // effect and config log_level was silently ignored).
+@@ -339,8 +354,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+     let (clash_log_layer, clash_log_handle) = clash_api::logs::layer();
+
+     use tracing_subscriber::prelude::*;
+-    let registry = tracing_subscriber::registry()
+-        .with(tracing_subscriber::fmt::layer().with_filter(env_filter));
++    let registry = tracing_subscriber::registry().with(
++        tracing_subscriber::fmt::layer()
++            .with_timer(OpenWrtLocalTimer)
++            .with_filter(env_filter),
 +    );
-     for group in &config.groups {
-         info!(
-             "Group '{}' resolved {} node(s)",
-@@ -871,6 +892,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+     #[cfg(feature = "clash-api")]
+     let registry = registry.with(clash_log_layer);
+     registry.init();
+@@ -944,6 +962,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
                          log_handle: clash_log_handle.clone(),
                          dns_service: control_plane.dns_service(),
                          stream_samplers,
@@ -650,7 +374,7 @@ index 71bc7cb..7b47e82 100644
                      });
                      tokio::spawn(clash_api::serve(state, listen));
                  }
-@@ -924,6 +946,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+@@ -996,6 +1015,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
                      }
                      Err(e) => {
                          warn!("Background subscription '{}' fetch failed: {}", sub.name, e);
@@ -664,7 +388,7 @@ index 71bc7cb..7b47e82 100644
                      }
                  }
              }
-@@ -967,6 +996,17 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+@@ -1040,6 +1066,17 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
                                  "Subscription '{}' refresh failed; keeping existing nodes: {}",
                                  sub.name, e
                              );
@@ -682,19 +406,7 @@ index 71bc7cb..7b47e82 100644
                          }
                      }
                  }
-@@ -1041,9 +1081,10 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
-                     // Resolve group filters into concrete node IDs, same as
-                     // startup — otherwise filter-based groups keep stale
-                     // (or empty) member lists in the rebuilt GroupManager.
--                    honk_config::parser::resolve_group_filters(
-+                    honk_config::parser::resolve_group_filters_with_subscriptions(
-                         &mut new_config.groups,
-                         &new_config.nodes,
-+                        &new_config.subscriptions,
-                     );
-                     if let Err(e) = reload_tx
-                         .send(control::ControlCommand::ReloadConfig {
-@@ -1081,10 +1122,19 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
+@@ -1190,10 +1227,19 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
                                              })
                                              .await;
                                      }
@@ -718,6 +430,61 @@ index 71bc7cb..7b47e82 100644
                                  }
                              }
                          });
+@@ -1809,10 +1855,52 @@ fn set_sysctl(key: &str, value: &str) -> anyhow::Result<()> {
+     Ok(())
+ }
+
+-/// Whether `path` is a mountpoint (appears in /proc/mounts).
++/// Whether `path`, or an existing namespace handle beneath it, is mounted.
++///
++/// `ip netns add NAME` bind-mounts `/run/netns/NAME` but does not mount the
++/// registry directory itself. Mounting a tmpfs over that directory would hide
++/// those live handles, so the daens compatibility mount must reuse the
++/// existing registry whenever it already contains a namespace mount.
++#[cfg(any(feature = "ebpf", test))]
++fn registry_mount_exists(mounts: &str, path: &str) -> bool {
++    let root = path.trim_end_matches('/');
++    let child_prefix = format!("{root}/");
++    mounts.lines().filter_map(|line| line.split_whitespace().nth(1)).any(|mount| {
++        mount == root || mount.starts_with(&child_prefix)
++    })
++}
++
++/// Whether `path`, or a child namespace handle, appears in `/proc/mounts`.
+ #[cfg(feature = "ebpf")]
+ fn is_mountpoint(path: &str) -> bool {
++    let canonical_path = std::fs::canonicalize(path)
++        .ok()
++        .and_then(|canonical_path| canonical_path.into_os_string().into_string().ok());
+     std::fs::read_to_string("/proc/mounts")
+-        .map(|m| m.lines().any(|l| l.split_whitespace().nth(1) == Some(path)))
++        .map(|mounts| {
++            registry_mount_exists(&mounts, path)
++                || canonical_path
++                    .as_deref()
++                    .map(|canonical_path| registry_mount_exists(&mounts, canonical_path))
++                    .unwrap_or(false)
++        })
+         .unwrap_or(false)
+ }
++
++#[cfg(test)]
++mod netns_registry_tests {
++    use super::registry_mount_exists;
++
++    #[test]
++    fn existing_ip_netns_handle_keeps_registry_visible() {
++        let mounts = "nsfs /run/netns/hkcache-client nsfs rw 0 0\n";
++        assert!(registry_mount_exists(mounts, "/run/netns"));
++        assert!(!registry_mount_exists(mounts, "/run/other-netns"));
++    }
++
++    #[test]
++    fn openwrt_realpath_registry_is_detected() {
++        let mounts = "nsfs /tmp/run/netns/hkcache-client nsfs rw 0 0\n";
++        assert!(registry_mount_exists(mounts, "/tmp/run/netns"));
++    }
++}
 diff --git a/crates/honk-core/src/mode.rs b/crates/honk-core/src/mode.rs
 index 3eaa960..e0c7aed 100644
 --- a/crates/honk-core/src/mode.rs
@@ -767,7 +534,7 @@ index 3eaa960..e0c7aed 100644
  }
 @@ -147,10 +152,14 @@ mod tests {
      }
- 
+
      #[test]
 -    fn test_override_outbound_rule_mode_keeps_routing() {
 +    fn test_override_outbound_rule_mode_uses_primary_for_proxy_routes() {
@@ -780,40 +547,30 @@ index 3eaa960..e0c7aed 100644
 +            "routed-proxy"
 +        );
      }
- 
+
      #[test]
 diff --git a/crates/honk-core/src/subscription.rs b/crates/honk-core/src/subscription.rs
-index cd80476..3b90a72 100644
+index ade4116..2409eea 100644
 --- a/crates/honk-core/src/subscription.rs
 +++ b/crates/honk-core/src/subscription.rs
-@@ -238,6 +238,14 @@ fn parse_clash_subscription(
-         if let Some(p) = get_str("password") {
-             node.password = Some(p);
-         }
-+        // Clash VLESS uses `uuid` for the authentication secret rather than
-+        // the generic `password` key consumed by Honk's VLESS handler.
-+        if protocol == NodeProtocol::VLess
-+            && node.password.is_none()
-+            && let Some(uuid) = get_str("uuid")
-+        {
-+            node.password = Some(uuid);
-+        }
-         if let Some(c) = get_str("cipher") {
-             node.encryption = Some(c);
-         }
-@@ -266,7 +274,7 @@ fn parse_clash_subscription(
-         }
- 
-         if let Some(path) = get_str("ws-path") {
--            node.ws_path = Some(path);
-+            node.ws_path = Some(strip_ws_early_data(&path));
-         }
-         if let Some(host) = get_str("ws-headers").or_else(|| get_str("ws-host")) {
-             node.ws_host = Some(host);
-@@ -288,6 +296,24 @@ fn parse_clash_subscription(
+@@ -227,7 +227,12 @@ impl SubscriptionManager {
+     }
+ }
+
+-fn parse_subscription_content(sub: &Subscription, content: &str) -> anyhow::Result<Vec<Node>> {
++/// Parse a downloaded subscription body without performing network I/O.
++/// OpenWrt's LuCI cache uses this path while Honk is stopped.
++pub fn parse_subscription_content(
++    sub: &Subscription,
++    content: &str,
++) -> anyhow::Result<Vec<Node>> {
+     let nodes = match sub.sub_type {
+         SubscriptionType::Simple | SubscriptionType::Sip008 => {
+             parse_base64_subscription(content, Some(sub.id), &sub.name)
+@@ -482,6 +487,24 @@ fn parse_clash_subscription(
      Ok(nodes)
  }
- 
+
 +/// Remove Xray's `ed=` early-data marker from Clash WebSocket paths.
 +/// Honk sends the VLESS header as the first binary WebSocket frame, which is
 +/// accepted by the same providers without relying on the subprotocol variant.
@@ -836,10 +593,10 @@ index cd80476..3b90a72 100644
  fn parse_node_uri(uri: &str) -> anyhow::Result<Node> {
      Node::from_share_link(uri).map_err(anyhow::Error::new)
 diff --git a/crates/honk-core/tests/clash_api_test.rs b/crates/honk-core/tests/clash_api_test.rs
-index 455a10a..bf22336 100644
+index 460424a..235e436 100644
 --- a/crates/honk-core/tests/clash_api_test.rs
 +++ b/crates/honk-core/tests/clash_api_test.rs
-@@ -151,6 +151,7 @@ async fn spawn_app_with_config(config: Config, secret: &str, external_ui: &str)
+@@ -152,6 +152,7 @@ async fn spawn_app_with_config(config: Config, secret: &str, external_ui: &str)
      )));
      let stats = Arc::new(StatsManager::new());
      let connection_tracker = Arc::new(ConnectionTracker::new());
@@ -847,15 +604,15 @@ index 455a10a..bf22336 100644
      let runtime_registry = honk_outbound::runtime::OutboundRuntimeRegistry::build(&config.nodes)
          .unwrap()
          .into_shared();
-@@ -181,6 +182,7 @@ async fn spawn_app_with_config(config: Config, secret: &str, external_ui: &str)
+@@ -182,6 +183,7 @@ async fn spawn_app_with_config(config: Config, secret: &str, external_ui: &str)
          dns_service,
          connection_pool: Arc::new(honk_core::pool::ConnectionPool::new()),
          stream_samplers: Arc::new(clash_api::StreamSamplers::new()),
 +        command_tx,
      });
- 
+
      let app = clash_api::router(state.clone());
-@@ -1210,6 +1212,7 @@ async fn test_dns_query_upstream_and_nxdomain() {
+@@ -1277,6 +1279,7 @@ async fn test_dns_query_upstream_and_nxdomain() {
          dns_service: nx_service,
          connection_pool: app.state.connection_pool.clone(),
          stream_samplers: app.state.stream_samplers.clone(),
@@ -877,7 +634,7 @@ index 629aa72..729945c 100644
    "debuginfo=2",
    "-C",
 diff --git a/crates/honk-outbound/src/proxy/transport.rs b/crates/honk-outbound/src/proxy/transport.rs
-index 9ee8cbd..cfe14a2 100644
+index a4e739d..be027eb 100644
 --- a/crates/honk-outbound/src/proxy/transport.rs
 +++ b/crates/honk-outbound/src/proxy/transport.rs
 @@ -31,10 +31,18 @@ use super::AsyncReadWrite;
@@ -898,7 +655,7 @@ index 9ee8cbd..cfe14a2 100644
 -    wrap_transport(node, tcp).await
 +    wrap_transport_with_initial_data(node, tcp, initial_data).await
  }
- 
+
  /// Apply TLS (when `node.tls`) and then the `node.transport` wrapping to an
 @@ -42,11 +50,19 @@ pub(crate) async fn connect_transport(
  pub(crate) async fn wrap_transport(
@@ -921,34 +678,7 @@ index 9ee8cbd..cfe14a2 100644
          "grpc" => wrap_grpc(node, stream).await,
          // Unknown transport must not silently degrade to raw TCP — a
          // mistyped transport means a different protocol than intended.
-@@ -58,6 +74,26 @@ pub(crate) async fn wrap_transport(
-     }
- }
- 
-+pub(crate) fn ws_early_data_enabled(node: &Node, data: &[u8]) -> bool {
-+    if node.transport != "ws" || data.is_empty() {
-+        return false;
-+    }
-+    let Some((_, query)) = node
-+        .ws_path
-+        .as_deref()
-+        .and_then(|path| path.split_once('?'))
-+    else {
-+        return false;
-+    };
-+    let Some(limit) = query.split('&').find_map(|part| {
-+        part.strip_prefix("ed=")
-+            .and_then(|value| value.parse::<usize>().ok())
-+    }) else {
-+        return false;
-+    };
-+    limit > 0 && data.len() <= limit
-+}
-+
- /// Wrap the stream in TLS when `node.tls` is set, using `node.sni` (or the
- /// server host) as the SNI.
- pub(crate) async fn maybe_tls_wrap(
-@@ -80,12 +116,18 @@ pub(crate) async fn maybe_tls_wrap(
+@@ -103,12 +119,18 @@ pub(crate) async fn maybe_tls_wrap_concrete(
  async fn wrap_ws(
      node: &Node,
      stream: Box<dyn AsyncReadWrite>,
@@ -958,27 +688,27 @@ index 9ee8cbd..cfe14a2 100644
 +        return wrap_ws_with_early_data(node, stream, data).await;
 +    }
      use tokio_tungstenite::tungstenite::client::IntoClientRequest;
- 
+
      let ws_path = node.ws_path.as_deref().unwrap_or("/");
      let ws_host = node.ws_host.as_deref().unwrap_or(node.host()).to_string();
- 
+
 +    tracing::debug!(node = %node.name, host = %ws_host, path = %ws_path, "WebSocket upgrade starting");
 +
      // Build the request from the URI so tungstenite generates the full
      // handshake header set (Sec-WebSocket-Key, Upgrade, ...); a bare
      // `http::Request` passed to `client_async` is sent as-is and real
-@@ -104,6 +146,7 @@ async fn wrap_ws(
+@@ -127,6 +149,7 @@ async fn wrap_ws(
      let (ws_stream, _response) = tokio_tungstenite::client_async(request, stream)
          .await
          .map_err(|e| anyhow::anyhow!("WebSocket upgrade failed: {}", e))?;
 +    tracing::debug!(node = %node.name, "WebSocket upgrade accepted");
- 
+
      let (client_half, server_half) = tokio::io::duplex(65536);
- 
-@@ -112,6 +155,71 @@ async fn wrap_ws(
+
+@@ -135,6 +158,71 @@ async fn wrap_ws(
      Ok(Box::new(client_half))
  }
- 
+
 +async fn wrap_ws_with_early_data(
 +    node: &Node,
 +    mut stream: Box<dyn AsyncReadWrite>,
@@ -1047,7 +777,7 @@ index 9ee8cbd..cfe14a2 100644
  /// Background task that bridges a WebSocket stream to a duplex half.
  /// Reads binary/text messages from the WebSocket and writes them to
  /// the duplex; reads from the duplex and sends as binary WebSocket
-@@ -126,6 +234,7 @@ async fn ws_bridge_relay(
+@@ -149,6 +237,7 @@ async fn ws_bridge_relay(
      // server → ws
      let s2w = async {
          let mut buf = vec![0u8; 65536];
@@ -1055,7 +785,7 @@ index 9ee8cbd..cfe14a2 100644
          loop {
              use tokio::io::AsyncReadExt;
              let n = server_read
-@@ -135,6 +244,14 @@ async fn ws_bridge_relay(
+@@ -158,6 +247,14 @@ async fn ws_bridge_relay(
              if n == 0 {
                  break;
              }
@@ -1070,8 +800,8 @@ index 9ee8cbd..cfe14a2 100644
              ws_sink
                  .send(tokio_tungstenite::tungstenite::Message::Binary(
                      buf[..n].to_vec().into(),
-@@ -148,15 +265,32 @@ async fn ws_bridge_relay(
- 
+@@ -171,15 +268,32 @@ async fn ws_bridge_relay(
+
      // ws → server
      let w2s = async {
 +        let mut first_frame = true;
@@ -1103,156 +833,11 @@ index 9ee8cbd..cfe14a2 100644
                      server_write.write_all(data.as_bytes()).await?;
                  }
                  Some(Ok(
-diff --git a/crates/honk-outbound/src/proxy/vless.rs b/crates/honk-outbound/src/proxy/vless.rs
-index 0486bbb..ce5236a 100644
---- a/crates/honk-outbound/src/proxy/vless.rs
-+++ b/crates/honk-outbound/src/proxy/vless.rs
-@@ -101,31 +101,16 @@ impl VLessHandler {
- 
-         buf
-     }
--
--    /// Connect to the server, optionally wrapping in TLS and then the
--    /// `node.transport` WS/gRPC layer (via `super::transport`).
--    async fn connect_server(
--        node: &Node,
--        connect_timeout: std::time::Duration,
--    ) -> anyhow::Result<Box<dyn AsyncReadWrite>> {
--        super::transport::connect_transport(node, connect_timeout).await
--    }
--
--    /// Wrap an already-connected TCP stream with TLS (when `node.tls`) and
--    /// then the `node.transport` WS/gRPC layer (the `dial_with_tcp` path).
--    async fn wrap_transport(
--        node: &Node,
--        tcp: TcpStream,
--    ) -> anyhow::Result<Box<dyn AsyncReadWrite>> {
--        super::transport::wrap_transport(node, tcp).await
--    }
- }
- 
- impl VLessHandler {
-     /// Read and validate the VLESS response header:
-     /// `[version(1)][addon_len(1)][addon(addon_len)]`. Reading only the
-     /// version byte would leave any addon bytes to corrupt the stream.
--    async fn read_response_header(stream: &mut Box<dyn AsyncReadWrite>) -> anyhow::Result<()> {
-+    async fn read_response_header<R>(stream: &mut R) -> anyhow::Result<()>
-+    where
-+        R: tokio::io::AsyncRead + Unpin + ?Sized,
-+    {
-         use tokio::io::AsyncReadExt;
-         let mut head = [0u8; 2];
-         stream.read_exact(&mut head).await?;
-@@ -141,6 +126,44 @@ impl VLessHandler {
-         }
-         Ok(())
-     }
-+
-+    /// VLESS servers are allowed to delay their response header until the
-+    /// first target payload arrives.  Reading the response inline in `dial`
-+    /// deadlocks against those servers because callers only write the target
-+    /// TLS/HTTP payload after `dial` returns.  Return a duplex stream and
-+    /// consume the response header on the read side while the write side can
-+    /// already forward the first payload.
-+    fn defer_response_header(stream: Box<dyn AsyncReadWrite>) -> Box<dyn AsyncReadWrite> {
-+        let (client, relay) = tokio::io::duplex(65536);
-+        tokio::spawn(async move {
-+            let (mut client_read, mut client_write) = tokio::io::split(relay);
-+            let (mut remote_read, mut remote_write) = tokio::io::split(stream);
-+
-+            let remote_to_client = async {
-+                Self::read_response_header(&mut remote_read).await?;
-+                tokio::io::copy(&mut remote_read, &mut client_write).await?;
-+                Ok::<_, anyhow::Error>(())
-+            };
-+            let client_to_remote = async {
-+                tokio::io::copy(&mut client_read, &mut remote_write).await?;
-+                Ok::<_, anyhow::Error>(())
-+            };
-+
-+            tokio::select! {
-+                result = remote_to_client => {
-+                    if let Err(error) = result {
-+                        tracing::debug!(error = %error, "VLESS response relay failed");
-+                    }
-+                }
-+                result = client_to_remote => {
-+                    if let Err(error) = result {
-+                        tracing::debug!(error = %error, "VLESS request relay failed");
-+                    }
-+                }
-+            }
-+        });
-+        Box::new(client)
-+    }
- }
- 
- #[async_trait]
-@@ -156,10 +179,26 @@ impl TcpOutbound for VLessHandler {
-         let uuid_bytes = Self::parse_uuid(uuid_str)?;
- 
-         let header = Self::build_request_header(&uuid_bytes, CMD_TCP, target, target_domain);
--        let mut stream = Self::connect_server(node, connect_timeout).await?;
--        stream.write_all(&header).await?;
-+        let early_data = super::transport::ws_early_data_enabled(node, &header);
-+        let mut stream = super::transport::connect_transport_with_initial_data(
-+            node,
-+            connect_timeout,
-+            early_data.then_some(header.as_slice()),
-+        )
-+        .await?;
-+        tracing::debug!(
-+            node = %node.name,
-+            target = %target,
-+            header_len = header.len(),
-+            early_data,
-+            "VLESS transport connected"
-+        );
-+        if !early_data {
-+            stream.write_all(&header).await?;
-+            tracing::debug!(node = %node.name, "VLESS request header sent");
-+        }
- 
--        Self::read_response_header(&mut stream).await?;
-+        stream = Self::defer_response_header(stream);
- 
-         Ok(ProxyStream {
-             stream,
-@@ -180,10 +219,26 @@ impl TcpOutbound for VLessHandler {
-         let uuid_bytes = Self::parse_uuid(uuid_str)?;
- 
-         let header = Self::build_request_header(&uuid_bytes, CMD_TCP, target, target_domain);
--        let mut stream = Self::wrap_transport(node, tcp).await?;
--        stream.write_all(&header).await?;
-+        let early_data = super::transport::ws_early_data_enabled(node, &header);
-+        let mut stream = super::transport::wrap_transport_with_initial_data(
-+            node,
-+            tcp,
-+            early_data.then_some(header.as_slice()),
-+        )
-+        .await?;
-+        tracing::debug!(
-+            node = %node.name,
-+            target = %target,
-+            header_len = header.len(),
-+            early_data,
-+            "VLESS transport connected"
-+        );
-+        if !early_data {
-+            stream.write_all(&header).await?;
-+            tracing::debug!(node = %node.name, "VLESS request header sent");
-+        }
- 
--        Self::read_response_header(&mut stream).await?;
-+        stream = Self::defer_response_header(stream);
- 
-         Ok(ProxyStream {
-             stream,
 diff --git a/crates/honk-outbound/src/tls.rs b/crates/honk-outbound/src/tls.rs
-index 64fd024..645eebe 100644
+index adfcf58..cba2dd8 100644
 --- a/crates/honk-outbound/src/tls.rs
 +++ b/crates/honk-outbound/src/tls.rs
-@@ -505,7 +505,15 @@ pub fn build_connector(node: &Node) -> anyhow::Result<TlsConnector> {
+@@ -516,7 +516,15 @@ pub fn build_connector(node: &Node) -> anyhow::Result<TlsConnector> {
      }
      if chrome {
          apply_chrome_ctx(&mut builder)?;
@@ -1267,19 +852,19 @@ index 64fd024..645eebe 100644
 +            builder.set_alpn_protos(CHROME_ALPN_WIRE)?;
 +        }
      }
- 
+
      Ok(TlsConnector {
 diff --git a/crates/honk-tool/Cargo.toml b/crates/honk-tool/Cargo.toml
-index 8a1bd97..dea13b0 100644
+index 8b48bbe..495a240 100644
 --- a/crates/honk-tool/Cargo.toml
 +++ b/crates/honk-tool/Cargo.toml
-@@ -20,6 +20,8 @@ libc.workspace = true
- tokio.workspace = true
- tracing.workspace = true
+@@ -22,6 +22,8 @@ tracing.workspace = true
+ url.workspace = true
+ uuid.workspace = true
  tracing-subscriber.workspace = true
 +serde_json.workspace = true
 +sha2.workspace = true
- 
+
  [dev-dependencies]
  tempfile.workspace = true
 diff --git a/crates/honk-tool/src/bpf.rs b/crates/honk-tool/src/bpf.rs
@@ -1288,7 +873,7 @@ index 77e8a14..ef7f67e 100644
 +++ b/crates/honk-tool/src/bpf.rs
 @@ -180,18 +180,31 @@ fn sum_percpu_outbound(buf: &[u8]) -> OutboundStatsCounters {
  }
- 
+
  fn possible_cpus() -> usize {
 -    std::fs::read_dir("/sys/devices/system/cpu")
 -        .map(|rd| {
@@ -1341,7 +926,7 @@ index 77e8a14..ef7f67e 100644
 +    #[arg(long, default_value_t = 0)]
 +    pub sample_ms: u64,
  }
- 
+
  pub async fn run(args: BpfArgs) -> anyhow::Result<()> {
 @@ -400,25 +419,41 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
      let fd = open(&args.pin_root, "BPF_STATS_MAP")?;
@@ -1364,7 +949,7 @@ index 77e8a14..ef7f67e 100644
 +             routing_handoff={handoff_failures} cookie_pid={cookie_failures}"
 +        );
 +    }
- 
+
      let fd = open(&args.pin_root, "CONN_STATE_OCCUPANCY")?;
      let inserts = read_percpu_sum(fd, ncpu, 0)?;
      let deletes = read_percpu_sum(fd, ncpu, 1)?;
@@ -1378,7 +963,7 @@ index 77e8a14..ef7f67e 100644
 +            inserts.saturating_sub(deletes)
 +        );
 +    }
- 
+
      let fd = open(&args.pin_root, "OUTBOUND_STATS")?;
 -    println!("\noutbound counters (tx_pkts tx_bytes rx_pkts rx_bytes):");
 +    if !args.json {
@@ -1459,12 +1044,12 @@ index 77e8a14..ef7f67e 100644
 +    }
      Ok(())
  }
- 
+
 diff --git a/crates/honk-tool/src/diagnose.rs b/crates/honk-tool/src/diagnose.rs
-index 99b5098..5540426 100644
+index d5b87d9..3b3fc2a 100644
 --- a/crates/honk-tool/src/diagnose.rs
 +++ b/crates/honk-tool/src/diagnose.rs
-@@ -67,6 +67,8 @@ pub async fn run(args: DiagnoseArgs) -> anyhow::Result<()> {
+@@ -64,6 +64,8 @@ pub async fn run(args: DiagnoseArgs) -> anyhow::Result<()> {
      // 5. Occupancy + overflow via the bpf stats path.
      match super::bpf::stats(super::bpf::StatsArgs {
          pin_root: args.pin_root.clone(),
@@ -1936,15 +1521,15 @@ index e3a6894..7eb22d8 100644
 -//! `geosite` / `geoip` (dat file content search).
 +//! `validate`, `geo` (Honk-owned Geo assets), and `geosite` / `geoip` (dat
 +//! file content search).
- 
+
  mod bpf;
  mod diagnose;
  mod geo;
  mod sub;
 +mod validate;
- 
+
  use clap::{Parser, Subcommand};
- 
+
 @@ -32,6 +34,10 @@ enum Command {
      Geosite(geo::GeositeArgs),
      /// Search geoip.dat: list codes, show CIDRs, longest-prefix IP lookup.
@@ -1954,7 +1539,7 @@ index e3a6894..7eb22d8 100644
 +    /// Inspect and repair Honk-owned Geo assets.
 +    Geo(geo::GeoCommand),
  }
- 
+
  #[tokio::main]
 @@ -49,5 +55,7 @@ async fn main() -> anyhow::Result<()> {
          Command::Diagnose(args) => diagnose::run(args).await,
@@ -1964,6 +1549,75 @@ index e3a6894..7eb22d8 100644
 +        Command::Geo(args) => geo::run(args),
      }
  }
+diff --git a/crates/honk-tool/src/sub.rs b/crates/honk-tool/src/sub.rs
+index 5aad6b7..2a0ecb1 100644
+--- a/crates/honk-tool/src/sub.rs
++++ b/crates/honk-tool/src/sub.rs
+@@ -7,6 +7,7 @@
+
+ use std::io::Read as _;
+ use std::net::SocketAddr;
++use std::path::PathBuf;
+ use std::sync::Arc;
+ use std::time::{Duration, Instant};
+
+@@ -81,6 +82,12 @@ impl ProbeFailureKind {
+ pub struct SubArgs {
+     /// Subscription URL (http/https) or a local file with one share link per line.
+     pub source: String,
++    /// Parse this already downloaded subscription payload instead of fetching source.
++    #[arg(long, value_name = "PATH")]
++    pub payload_file: Option<PathBuf>,
++    /// Output format. JSON emits the parsed node list without probing it.
++    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
++    pub format: OutputFormat,
+     /// Test target for proxied connectivity/latency (host:port).
+     #[arg(long, default_value = "cp.cloudflare.com:443")]
+     pub target: String,
+@@ -116,6 +123,12 @@ pub struct SubArgs {
+     pub v6_target: Option<SocketAddr>,
+ }
+
++#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
++pub enum OutputFormat {
++    Text,
++    Json,
++}
++
+ struct ProbeOutcome {
+     node_name: String,
+     shape: String,
+@@ -132,6 +145,10 @@ struct ProbeOutcome {
+ pub async fn run(args: SubArgs) -> anyhow::Result<()> {
+     configure_tls(&args)?;
+     let mut nodes = load_nodes(&args).await?;
++    if args.format == OutputFormat::Json {
++        println!("{}", serde_json::to_string(&nodes)?);
++        return Ok(());
++    }
+     if args.limit > 0 {
+         nodes.truncate(args.limit);
+     }
+@@ -240,6 +257,19 @@ fn parse_subscription_url_from_stdin(input: &str) -> anyhow::Result<String> {
+
+ /// Load nodes from a subscription URL or a local share-link file.
+ async fn load_nodes(args: &SubArgs) -> anyhow::Result<Vec<Node>> {
++    if let Some(path) = args.payload_file.as_deref() {
++        let content = std::fs::read_to_string(path)
++            .with_context(|| format!("read payload '{}'", path.display()))?;
++        let sub = Subscription {
++            name: "payload".into(),
++            url: args.source.clone(),
++            sub_type: SubscriptionType::Custom,
++            user_agent: args.ua.clone(),
++            ..Default::default()
++        };
++        return honk_core::subscription::parse_subscription_content(&sub, &content)
++            .context("parse subscription payload");
++    }
+     let source = if args.source == "-" {
+         let mut input = String::new();
+         std::io::stdin()
 diff --git a/crates/honk-tool/src/validate.rs b/crates/honk-tool/src/validate.rs
 new file mode 100644
 index 0000000..0d4ddf1
@@ -2112,43 +1766,13 @@ index 0000000..0d4ddf1
 +    }
 +}
 diff --git a/doc/configuration.en.md b/doc/configuration.en.md
-index 412971a..e72e351 100644
+index 967d967..5c0e98f 100644
 --- a/doc/configuration.en.md
 +++ b/doc/configuration.en.md
-@@ -255,6 +255,7 @@ Group-level knobs without a dae-syntax key keep their defaults: URLTest `toleran
- | `name('exact')` | Exact name |
- | `name(keyword: 'pat')` | Substring |
- | `group('hk')` / `group('hk', 'jp')` | Nested groups |
-+| `subscription('tag')` | Nodes fetched from the named subscription |
- 
- Rules of thumb:
- 
-@@ -413,10 +414,20 @@ Upstream URIs take a scheme prefix: `udp://`, `tcp://`, `tcp+udp://`, `tls://`,
- 
- ```dae
- subscription {
--    my-sub: 'https://example.com/sub'
-+    my-sub {
-+        url: 'https://example.com/sub'
-+        update_interval: 86400
-+        enabled: true
-+    }
+@@ -513,6 +513,14 @@ experimental {
  }
  ```
- 
-+The legacy `my-sub: 'https://example.com/sub'` form remains supported. Honk's
-+LuCI node selector creates a selector group using `filter:
-+subscription('my-sub')`, so fetched nodes can be selected directly or used by
-+routing rules. `update_interval: 0` disables periodic refresh while keeping
-+manual refresh available.
-+
- Each entry is `tag: 'url'` (a bare quoted URL is also accepted). In dae syntax the subscription type, update interval, and enabled flag keep their defaults (auto/simple, 86400 s, enabled).
- 
- - Startup fetch races a short deadline; late results merge via the control-plane channel.
-@@ -438,6 +449,14 @@ experimental {
- }
- ```
- 
+
 +The `GLOBAL` selector is retained for Clash API compatibility and stores one
 +primary node selection. LuCI presents it as the **Primary Node** rather than a
 +separate proxy group. In `Rule` mode, explicit `direct`, `block`, and `(must)`
@@ -2158,5 +1782,5 @@ index 412971a..e72e351 100644
 +routing result until a primary node is selected.
 +
  Useful endpoints: `/proxies`, `/proxies/{name}` (PUT selector), `/proxies/{name}/delay`, `/group/{name}/delay`, `/connections`, `/traffic`, `/logs`, `/dns/query`, `/stats`.
- 
+
  Env: `HONK_UI_DOWNLOAD_URL` overrides the default zashboard zip URL when `external_ui` is empty/missing. The download follows the traffic routing decision (Router + group selection): `direct` fetches directly, `block` aborts it, any other outbound is dialed through the selected node.

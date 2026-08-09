@@ -3,8 +3,8 @@
     "ebpf": {
       "lockPath": "crates/honk-ebpf/Cargo.lock",
       "lockSha256": "7a2573128a47a26f2fb9014659bd7371096ebafe44a8da96e642be8fe834e5a6",
-      "metadataSha256": "bd693bd294e0aae154763a4fde15a6e2b364b8f6ab8375bb1b95e52c83e0ba67",
-      "sourceCommit": "42051071cb77275276ee17305d947df95b348fc2",
+      "metadataSha256": "f664ff4435b3ad36e6c60ecea67402dc40af6760bd527653e876f5d9f5611db7",
+      "sourceCommit": "94741484abbe0d4eb64c1d1691c455b739aa5694",
       "status": "attested",
       "vendorPath": ".cache/dl/cargo-vendor/ebpf",
       "vendorSha256": "5ada2e6a03d35827edf65ea200275305137105e5030197d89701063515e18acc"
@@ -16,7 +16,7 @@
       "lockSha256": "9e87d1ac04edbf5fa61e27cb21984a83566573a007767713868965fba70acb6d",
       "manifestSha256": "1bf70a4f1406732dd79957ccc0d0afc78bdc69cdfa3b5f57857ab56727e05d56",
       "offlineArchivePath": ".cache/dl/rust-src-nightly-2026-07-20.tar.xz",
-      "sourceCommit": "42051071cb77275276ee17305d947df95b348fc2",
+      "sourceCommit": "94741484abbe0d4eb64c1d1691c455b739aa5694",
       "status": "attested"
     },
     "requiredFeatureEdges": [
@@ -43,9 +43,9 @@
     ],
     "workspace": {
       "lockPath": "Cargo.lock",
-      "lockSha256": "0ba10cbf4d18b332631e3ec9349f208c42bdd1175d309455ab935fa3c6765694",
-      "metadataSha256": "5ca95a1827b07f71feba3145663d0239e8f7ab3fdabea2b38a1b188c5f9cb93a",
-      "sourceCommit": "42051071cb77275276ee17305d947df95b348fc2",
+      "lockSha256": "761ae24eeef9885f8645499e00d95092577cf63745040fea2bbcc45151d39ba6",
+      "metadataSha256": "bbbe8d141862072a5166f7af68e384a735d5543f50d678af101c5a3bd08aa8dd",
+      "sourceCommit": "94741484abbe0d4eb64c1d1691c455b739aa5694",
       "status": "attested",
       "vendorPath": ".cache/dl/cargo-vendor/workspace",
       "vendorSha256": "8563207917f3d664507fc3fbc6035bc1782a02a44a4961228fbb6010457a79f6"

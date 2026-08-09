@@ -1,0 +1,49 @@
+diff --git a/crates/honk-core/src/clash_api.rs b/crates/honk-core/src/clash_api.rs
+index 779f189..ab462f8 100644
+--- a/crates/honk-core/src/clash_api.rs
++++ b/crates/honk-core/src/clash_api.rs
+@@ -34,6 +34,7 @@ use honk_outbound::group::{GroupManager, SharedGroupManager};
+ use honk_outbound::urltest::{urltest_group, urltest_node_in_generation};
+ use std::sync::{Arc, Weak};
+ use std::time::Duration;
++use tokio::sync::mpsc;
+
+ const STREAM_CHANNEL_CAPACITY: usize = 16;
+ const CONNECTION_INTERVAL_BUCKETS_MS: [u64; 9] =
+diff --git a/crates/honk-core/src/control/mod.rs b/crates/honk-core/src/control/mod.rs
+index 86d5333..3245263 100644
+--- a/crates/honk-core/src/control/mod.rs
++++ b/crates/honk-core/src/control/mod.rs
+@@ -82,6 +82,13 @@ pub mod commands {
+             name: String,
+             nodes: Vec<Node>,
+         },
++        /// Record a failed subscription refresh while keeping its last good
++        /// node set active.
++        SubscriptionError {
++            subscription_id: uuid::Uuid,
++            name: String,
++            error: String,
++        },
+         /// Refresh generated gateway-address rules and bypass stale health
+         /// backoff after a link, address, route, or interface-role change.
+         NetworkChanged,
+@@ -1378,6 +1385,18 @@ impl ControlPlane {
+                             // both commands queue on this single channel.
+                             let _ = self.apply_runtime_config(new_config, &drain).await;
+                         }
++                        Some(ControlCommand::SubscriptionError { subscription_id, name, error }) => {
++                            let mut config = self.config.write().await;
++                            if let Some(subscription) = config
++                                .subscriptions
++                                .iter_mut()
++                                .find(|subscription| subscription.id == subscription_id)
++                            {
++                                subscription.last_error = Some(error);
++                            } else {
++                                warn!("Subscription '{}' is no longer configured", name);
++                            }
++                        }
+                         Some(ControlCommand::NetworkChanged) => {
+                             let new_config = {
+                                 let current = self.config.read().await;

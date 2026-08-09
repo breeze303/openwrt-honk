@@ -257,6 +257,7 @@ DNS has its own upstream and request/response routing sections:
 
 ~~~dae
 dns {
+	bind: 'tcp+udp://127.0.0.1:1053'
     upstream {
         local: 'udp://223.5.5.5:53'
         remote: 'https://dns.google/dns-query' -> proxy
@@ -275,12 +276,12 @@ dns {
 
 Supported upstream prefixes are udp://, tcp://, tcp+udp://, tls://, https://, h3://, and quic://. The LuCI editor exposes the protocol, host, port, path, SNI, and outbound fields as form controls.
 
-When `proxy_local_dns` is enabled (the package default), the init script follows
-the DAE-style lifecycle: it discovers the active WAN DNS servers through
-`ubus`, writes `/tmp/resolv.conf.honk`, and bind-mounts that file over the
-system resolver path while Honk is running. The mount is restored on stop and
-is guarded by an ownership marker, so a resolver mount owned by another
-service is left untouched. Honk does not open a fixed `127.0.0.2` listener.
+When `dnsmasq_forwarding` is enabled (the package default), Honk listens on
+`127.0.0.1:1053` for both TCP and UDP. The launcher waits for both listeners,
+then installs a temporary dnsmasq `no-resolv` and `server=127.0.0.1#1053`
+fragment. This covers router-local and LAN DNS requests without replacing
+`/etc/resolv.conf`; the fragment is removed before stop and after an unexpected
+core exit. Domain-specific dnsmasq rules remain untouched.
 
 Every LuCI-managed proxy mode begins with these fixed routing rules:
 

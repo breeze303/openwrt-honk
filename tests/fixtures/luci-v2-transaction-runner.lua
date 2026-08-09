@@ -1,5 +1,6 @@
 local function read(path)
-	local file = assert(io.open(path, "rb"))
+	local file = io.open(path, "rb")
+	if not file then return nil end
 	local value = file:read("*a")
 	file:close()
 	return value
@@ -125,9 +126,9 @@ if arg[4] == "success" then
 		assert(read(arg[2]) == result.config, "interface response differs from committed configuration")
 		print("interfaces=config-returned")
 	elseif arg[4] == "local-dns" then
-		local result, status = service.apply_interfaces({ lanDevice = "br-lan", wanDevice = "eth0.2", dialMode = "domain", logLevel = "info", proxyLocalDns = true, expectedRevision = expected })
+		local result, status = service.apply_interfaces({ lanDevice = "br-lan", wanDevice = "eth0.2", dialMode = "domain", logLevel = "info", dnsmasqForwarding = true, expectedRevision = expected })
 		assert(result and result.ok and not status, "local DNS transaction failed")
-		assert(uci_values.proxy_local_dns == "1", "local DNS enable flag was not persisted")
+		assert(uci_values.dnsmasq_forwarding == "1", "dnsmasq forwarding flag was not persisted")
 		assert(uci_values.local_dns_servers == nil, "obsolete local DNS listener was retained")
 		assert(result.localDns and result.localDns.enabled and result.localDns.servers ~= "", "local DNS state was not returned")
 		print("local-dns=persisted")

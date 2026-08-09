@@ -22,7 +22,7 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 commit=$(jq -er '.source.commit' "$repo_root/locks/source.lock.json")
 archive=$(jq -er '.source.archive.offlinePath' "$repo_root/locks/source.lock.json")
 top=$(jq -er '.source.archive.topLevelDirectory' "$repo_root/locks/source.lock.json")
-patch_path="honk/patches/100-beta40-openwrt-contracts.patch"
+patch_path="honk/patches/100-openwrt-main-contracts.patch"
 patch_sha=$(jq -er --arg path "$patch_path" '.source.patchDigests[] | select(.path == $path) | .sha256' "$repo_root/locks/source.lock.json")
 actual_sha=$(sha256sum "$repo_root/$patch_path" | cut -d ' ' -f1)
 [ "$actual_sha" = "$patch_sha" ] || fail "subscription patch digest drift"
@@ -54,12 +54,12 @@ test_log="$evidence/cargo-test.log"
 set +e
 (cd "$source_dir" && HOME="$home" RUSTUP_HOME="$rustup_home" CARGO_HOME="$cargo_home" CARGO_TARGET_DIR="$target_dir" \
 	RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-1.97.1}" CARGO_NET_OFFLINE=true \
-	cargo test -p honk-config test_parse_subscription_options_and_filter --no-default-features -- --nocapture) \
+	cargo test -p honk-config test_group_subscription_filter_exact_regex_and_compound --no-default-features -- --nocapture) \
 	>"$test_log" 2>&1
 test_code=$?
 set -e
 [ "$test_code" -eq 0 ] || { tail -80 "$test_log" >&2; fail "subscription filter behavior test"; }
-grep -F 'test_parse_subscription_options_and_filter ... ok' "$test_log" >/dev/null || fail "alpha/beta behavior assertion missing"
+grep -F 'test_group_subscription_filter_exact_regex_and_compound ... ok' "$test_log" >/dev/null || fail "subscription filter behavior assertion missing"
 pass "subscription('tag') runtime behavior"
 
 jq -n \
@@ -82,7 +82,7 @@ fi
 printf '%s\n' '{"fixture":"wrong-patch-sha","ok":false,"expected":"digest mismatch"}' >"$evidence/failures/wrong-patch-sha.json"
 pass "wrong patch SHA rejected"
 
-if grep -F 'resolve_group_filters_with_subscriptions' "$source_dir/crates/honk-config/src/parser/mod.rs" >/dev/null \
+if grep -F 'resolve_group_filters(&mut config.groups, &config.nodes, &config.subscriptions)' "$source_dir/crates/honk-config/src/parser/mod.rs" >/dev/null \
 	&& grep -F 'subscription_id' "$source_dir/crates/honk-config/src/node.rs" >/dev/null; then
 	pass "source tag is distinct from display name"
 else
