@@ -28,7 +28,7 @@ transaction_config="$tmp/transaction.dae"
 cp "$repo_root/tests/fixtures/luci-v2-config.dae" "$transaction_config"
 chmod 600 "$transaction_config"
 mkdir -p "$tmp/run"
-for outcome in success failure conflict interfaces clear-logs; do
+for outcome in success failure conflict interfaces local-dns clear-logs; do
 	cp "$repo_root/tests/fixtures/luci-v2-config.dae" "$transaction_config"
 	chmod 600 "$transaction_config"
 	HONK_CONFIG_PATH="$transaction_config" \
@@ -46,6 +46,7 @@ grep -F 'transaction=committed' "$tmp/transaction-success.log" >/dev/null
 grep -F 'transaction=restored' "$tmp/transaction-failure.log" >/dev/null
 grep -F 'transaction=conflict' "$tmp/transaction-conflict.log" >/dev/null
 grep -F 'interfaces=config-returned' "$tmp/transaction-interfaces.log" >/dev/null
+grep -F 'local-dns=persisted' "$tmp/transaction-local-dns.log" >/dev/null
 grep -F 'logs=cleared' "$tmp/transaction-clear-logs.log" >/dev/null
 cp "$repo_root/tests/fixtures/luci-v2-config.dae" "$transaction_config"
 chmod 600 "$transaction_config"
@@ -62,7 +63,8 @@ grep -F 'clash-api=toggle' "$tmp/transaction-clash-api.log" >/dev/null
 
 grep -F "domain(geosite: gfw) -> honk-proxy" "$repo_root/luci-app-honk/luasrc/model/mode.lua" >/dev/null
 grep -F "dip(geoip: cn) -> honk-proxy" "$repo_root/luci-app-honk/luasrc/model/mode.lua" >/dev/null
-grep -F "dip(geoip: private) -> direct(must)" "$repo_root/luci-app-honk/luasrc/model/mode.lua" >/dev/null
+grep -F "pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)" "$repo_root/luci-app-honk/luasrc/model/mode.lua" >/dev/null
+grep -F "dip(geoip: private) -> direct" "$repo_root/luci-app-honk/luasrc/model/mode.lua" >/dev/null
 grep -F "direct-dns" "$repo_root/luci-app-honk/luasrc/model/dns.lua" >/dev/null
 grep -F "proxy-dns" "$repo_root/luci-app-honk/luasrc/model/dns.lua" >/dev/null
 grep -F "ADVANCED_TAKEOVER_REQUIRED" "$repo_root/luci-app-honk/luasrc/model/service.lua" >/dev/null
@@ -100,6 +102,9 @@ grep -F "LOG_LEVEL_INVALID" "$repo_root/luci-app-honk/luasrc/model/service.lua" 
 grep -F 'function M.clear_logs' "$repo_root/luci-app-honk/luasrc/model/service.lua" >/dev/null
 grep -F 'clearLogs' "$repo_root/luci-app-honk/ui/src/api.ts" >/dev/null
 grep -F 'logLevel' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null
+grep -F 'proxyLocalDns' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null
+grep -F 'localDnsServers' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null
+if grep -F '127.0.0.2' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null; then fail "fixed host DNS listener remains in the UI"; fi
 grep -F 'clearLogs' "$repo_root/luci-app-honk/ui/src/views/LogsView.vue" >/dev/null
 grep -F 'result.config = config.read()' "$repo_root/luci-app-honk/luasrc/model/service.lua" >/dev/null
 grep -F 'interface-discovery' "$repo_root/honk/Makefile" >/dev/null

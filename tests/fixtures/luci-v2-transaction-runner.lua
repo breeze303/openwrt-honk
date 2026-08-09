@@ -44,10 +44,17 @@ package.preload["luci.jsonc"] = function()
 		stringify = function() return "{}" end,
 	}
 end
+local uci_values = {}
 package.preload["luci.model.uci"] = function()
 	return {
 		cursor = function()
-			return { get = function() return nil end }
+			return {
+				get = function(_, _, _, key) return uci_values[key] end,
+				set = function(_, _, _, key, value) uci_values[key] = value; return true end,
+				delete = function(_, _, _, key) uci_values[key] = nil; return true end,
+				save = function() return true end,
+				commit = function() return true end,
+			}
 		end,
 	}
 end
@@ -117,6 +124,13 @@ if arg[4] == "success" then
 		assert(result.config:find("log_level: 'debug'"), "interface response omitted log level")
 		assert(read(arg[2]) == result.config, "interface response differs from committed configuration")
 		print("interfaces=config-returned")
+	elseif arg[4] == "local-dns" then
+		local result, status = service.apply_interfaces({ lanDevice = "br-lan", wanDevice = "eth0.2", dialMode = "domain", logLevel = "info", proxyLocalDns = true, expectedRevision = expected })
+		assert(result and result.ok and not status, "local DNS transaction failed")
+		assert(uci_values.proxy_local_dns == "1", "local DNS enable flag was not persisted")
+		assert(uci_values.local_dns_servers == nil, "obsolete local DNS listener was retained")
+		assert(result.localDns and result.localDns.enabled and result.localDns.servers ~= "", "local DNS state was not returned")
+		print("local-dns=persisted")
 	elseif arg[4] == "clear-logs" then
 		local log_path = assert(os.getenv("HONK_LOG_PATH"), "log path fixture missing")
 		write(log_path, "sensitive log line\n")

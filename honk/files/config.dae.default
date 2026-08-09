@@ -13,6 +13,8 @@ global {
 }
 
 routing {
+	pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)
+	dip(geoip: private) -> direct
 	fallback: direct
 }
 

@@ -275,6 +275,23 @@ dns {
 
 Supported upstream prefixes are udp://, tcp://, tcp+udp://, tls://, https://, h3://, and quic://. The LuCI editor exposes the protocol, host, port, path, SNI, and outbound fields as form controls.
 
+When `proxy_local_dns` is enabled (the package default), the init script follows
+the DAE-style lifecycle: it discovers the active WAN DNS servers through
+`ubus`, writes `/tmp/resolv.conf.honk`, and bind-mounts that file over the
+system resolver path while Honk is running. The mount is restored on stop and
+is guarded by an ownership marker, so a resolver mount owned by another
+service is left untouched. Honk does not open a fixed `127.0.0.2` listener.
+
+Every LuCI-managed proxy mode begins with these fixed routing rules:
+
+~~~dae
+pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)
+dip(geoip: private) -> direct
+~~~
+
+Mode switching only changes the following device, Geo, and fallback rules;
+these resolver-process and private-network rules remain unchanged.
+
 ## Logs and Recovery
 
 Inspect the bounded runtime log when a service action or node fails:

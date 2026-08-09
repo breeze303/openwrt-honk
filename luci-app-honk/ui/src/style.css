@@ -279,6 +279,10 @@ textarea { padding: 10px; line-height: 1.5; resize: vertical; }
 .network-grid label { min-width: 0; }
 .network-grid label > span, .network-candidates > span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 650; }
 .dial-mode-field small { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.local-dns-field { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 38px; }
+.local-dns-field > span { flex: 1 1 auto; margin: 0 !important; }
+.local-dns-field input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); }
+.local-dns-field small, .local-dns-servers-field small { display: block; flex-basis: 100%; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .network-candidates { min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-muted); }
 .network-candidate { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 32px; padding: 5px 0; border-bottom: 1px solid var(--line); }
 .network-candidate:last-of-type { border-bottom: 0; }

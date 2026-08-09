@@ -30,6 +30,14 @@ local config = require "luci.model.config"
 local source = read(arg[2])
 local output_dir = arg[3]
 
+local function routing_rule_count(content, rule)
+	local count = 0
+	for line in content:gmatch("[^\n]+") do
+		if line == "\t" .. rule then count = count + 1 end
+	end
+	return count
+end
+
 local detected, managed = mode.detect(source)
 assert(detected == "china-direct" and managed, "legacy china-direct migration was not detected")
 
@@ -50,7 +58,10 @@ for _, name in ipairs({ "china-direct", "gfwlist", "china-proxy", "global" }) do
 		deviceRules = {},
 	})
 	assert(compiled, err)
-	assert(compiled.candidate:find("dip(geoip: private) -> direct(must)", 1, true), "private rule missing")
+	assert(compiled.candidate:find("pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)", 1, true), "resolver process rule missing")
+	assert(compiled.candidate:find("dip(geoip: private) -> direct", 1, true), "private rule missing")
+	assert(routing_rule_count(compiled.candidate, "pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)") == 1, "resolver process rule duplicated")
+	assert(routing_rule_count(compiled.candidate, "dip(geoip: private) -> direct") == 1, "private rule duplicated")
 	assert(compiled.candidate:find("direct-dns", 1, true), "new direct DNS name missing")
 	assert(compiled.candidate:find("proxy-dns", 1, true), "new proxy DNS name missing")
 	local projected_dns = require "luci.model.dns".current(compiled.candidate)
@@ -63,6 +74,8 @@ for _, name in ipairs({ "china-direct", "gfwlist", "china-proxy", "global" }) do
 		deviceRules = {},
 	})
 	assert(recompiled, recompile_error or "generated config could not be compiled again")
+	assert(routing_rule_count(recompiled.candidate, "pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)") == 1, "resolver process rule changed after recompilation")
+	assert(routing_rule_count(recompiled.candidate, "dip(geoip: private) -> direct") == 1, "private rule changed after recompilation")
 	assert(not compiled.candidate:find("aliyun:", 1, true), "legacy DNS name leaked")
 	assert(compiled.candidate:find("node {\n\tfixture-node: 'socks5://127.0.0.1:1080'\n}", 1, true), "node bytes changed")
 	assert(compiled.candidate:find("subscription {", 1, true), "subscription section missing")

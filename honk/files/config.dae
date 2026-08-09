@@ -8,12 +8,32 @@ global {
 	tcp_check_url: 'http://cp.cloudflare.com,1.1.1.1'
 	tcp_check_http_method: HEAD
 	udp_check_dns: 'dns.google.com:53,8.8.8.8'
+	fallback_resolver: '8.8.8.8:53'
+	tls_implementation: "tls"
 	check_interval: 30s
 	check_tolerance: 50ms
 }
 
 routing {
+	pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)
+	dip(geoip: private) -> direct
 	fallback: direct
+}
+
+dns {
+	upstream {
+		alidns: 'udp://223.5.5.5:53'
+		googledns: 'tcp+udp://8.8.8.8:53'
+	}
+	routing {
+		request {
+			qname(geosite: cn) -> alidns
+			fallback: googledns
+		}
+		response {
+			fallback: accept
+		}
+	}
 }
 
 experimental {

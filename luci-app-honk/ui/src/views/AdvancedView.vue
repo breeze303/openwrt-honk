@@ -18,6 +18,8 @@ const lanDevice = ref('')
 const wanDevice = ref('')
 const dialMode = ref<DialMode>('domain')
 const logLevel = ref<LogLevel>('info')
+const proxyLocalDns = ref(true)
+const localDnsServers = ref('')
 const interfaceBusy = ref(false)
 const loadedSource = ref('')
 type AdvancedTab = 'global' | 'config'
@@ -140,6 +142,8 @@ async function load(preferredConfig = '') {
     logLevel.value = configuredLogLevel(source.value)
     revision.value = state.revision
     clashApi.value = state.clashApi || { enabled: false, controller: '', secretConfigured: false }
+    proxyLocalDns.value = state.localDns?.enabled ?? true
+    localDnsServers.value = state.localDns?.servers || ''
     valid.value = false
     const network = await api.networkInterfaces()
     discovery.value = network
@@ -161,7 +165,7 @@ async function applyInterfaces() {
   if (!window.confirm(t('globalSettingsApplyConfirm'))) return
   interfaceBusy.value = true
   try {
-    const result = await api.applyInterfaces({ lanDevice: lanDevice.value, wanDevice: wanDevice.value, dialMode: dialMode.value, logLevel: logLevel.value, expectedRevision: revision.value })
+    const result = await api.applyInterfaces({ lanDevice: lanDevice.value, wanDevice: wanDevice.value, dialMode: dialMode.value, logLevel: logLevel.value, proxyLocalDns: proxyLocalDns.value, expectedRevision: revision.value })
     if (result.config) source.value = result.config
     if (result.revision) revision.value = result.revision
     emit('notice', t('globalSettingsApplied'))
@@ -271,7 +275,7 @@ function publishPageActions() {
   emit('pageActions', [action])
 }
 
-watch([activeTab, busy, loading, interfaceBusy, lanDevice, wanDevice, logLevel], publishPageActions, { immediate: true })
+watch([activeTab, busy, loading, interfaceBusy, lanDevice, wanDevice, logLevel, proxyLocalDns, localDnsServers], publishPageActions, { immediate: true })
 
 onMounted(() => {
   activeTab.value = tabFromHash()
@@ -317,6 +321,8 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', handleHashChange)
         <label><span>{{ t('lanInterface') }}</span><select v-model="lanDevice" :disabled="busy || loading || interfaceBusy"><option value="">{{ t('interfaceAuto') }}</option><option v-for="item in discovery?.candidates || []" :key="`lan-${item.l3Device}`" :value="item.l3Device">{{ item.l3Device }} · {{ item.logicalName || item.kind }}</option></select></label>
         <label><span>{{ t('wanInterface') }}</span><select v-model="wanDevice" :disabled="busy || loading || interfaceBusy"><option value="">{{ t('interfaceAuto') }}</option><option v-for="item in discovery?.candidates || []" :key="`wan-${item.l3Device}`" :value="item.l3Device">{{ item.l3Device }} · {{ item.logicalName || item.kind }}</option></select></label>
         <label class="dial-mode-field"><span>{{ t('dialMode') }}</span><select v-model="dialMode" :disabled="busy || loading || interfaceBusy"><option value="ip">{{ t('dialModeIp') }}</option><option value="domain">{{ t('dialModeDomain') }}</option><option value="domain+">{{ t('dialModePlus') }}</option><option value="domain++">{{ t('dialModePlusPlus') }}</option></select><small>{{ t('dialModeHint') }}</small></label>
+        <label class="local-dns-field"><span>{{ t('localDnsProxy') }}</span><input v-model="proxyLocalDns" type="checkbox" :disabled="busy || loading || interfaceBusy" /><small>{{ t('localDnsProxyHint') }}</small></label>
+        <label class="local-dns-servers-field"><span>{{ t('localDnsServers') }}</span><input :value="localDnsServers" type="text" readonly disabled /><small>{{ t('localDnsServersHint') }}</small></label>
         <div class="network-candidates"><span>{{ t('interfaceCandidates') }}</span><div v-for="item in discovery?.candidates || []" :key="item.l3Device" class="network-candidate"><strong>{{ item.l3Device }}</strong><small>{{ item.logicalName || item.kind }} · {{ item.up ? t('interfaceStatusUp') : t('interfaceStatusDown') }}<template v-if="item.defaultRoute"> · {{ t('interfaceRoute') }} {{ item.defaultRoute.metric }}</template></small></div><p v-if="!discovery?.candidates?.length">{{ t('interfaceUnknown') }}</p></div>
       </div>
       <div class="interface-actions"><span v-if="discovery?.recommended?.lan && discovery?.recommended?.wan">{{ t('interfaceRecommended') }}: {{ discovery.recommended.lan }} / {{ discovery.recommended.wan }}</span></div>

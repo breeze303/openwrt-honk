@@ -12,6 +12,12 @@ M.MODES = {
 	global = { label = "全局模式", geoSite = {}, geoIp = { "private" } },
 }
 
+-- Keep resolver processes and private networks outside the mode-specific rules.
+local FIXED_ROUTING_RULES = {
+	"pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)",
+	"dip(geoip: private) -> direct",
+}
+
 local function routing_body(content)
 	local section = config.section(content, "routing")
 	return section and config.section_body(content, section) or ""
@@ -49,7 +55,15 @@ function M.detect(content)
 	local significant = 0
 	for line in body:gmatch("[^\n]+") do
 		local clean = config.trim(line:gsub("#.*$", ""))
-		if clean:find("->", 1, true) and not clean:match("^dip%s*%(%s*geoip:%s*private%s*%)%s*%-%>%s*direct%(must%)$") then significant = significant + 1 end
+		if clean:find("->", 1, true) and
+			not clean:match("^pname%s*%(%s*NetworkManager%s*,%s*systemd%-resolved%s*,%s*dnsmasq%s*%)%s*%-%>%s*direct%(must%)$") and
+			not clean:match("^dip%s*%(%s*geoip:%s*private%s*%)%s*%-%>%s*direct$") and
+			not clean:match("^dip%s*%(%s*geoip:%s*private%s*%)%s*&&%s*!dport%s*%(%s*53%s*%)%s*%-%>%s*direct%(must%)$") and
+			not clean:match("^dip%s*%(%s*geoip:%s*private%s*%)%s*%-%>%s*direct%(must%)$") and
+			not clean:match("^pname%s*%(%s*dnsmasq%s*%)%s*&&%s*l4proto%s*%(%s*udp%s*%)%s*&&%s*dport%s*%(%s*53%s*%)%s*%-%>%s*direct%(must%)$") and
+			not clean:match("^pname%s*%(%s*dnsmasq%s*%)%s*%-%>%s*direct%(must%)$") then
+			significant = significant + 1
+		end
 	end
 	if target ~= "direct" and significant == 0 then return "global", true end
 	return nil, false
@@ -149,7 +163,8 @@ local function render_group(selected)
 end
 
 local function render_routing(mode, device_rules)
-	local lines = { "routing {", "\tdip(geoip: private) -> direct(must)" }
+	local lines = { "routing {" }
+	for _, rule in ipairs(FIXED_ROUTING_RULES) do lines[#lines + 1] = "\t" .. rule end
 	for _, rule in ipairs(device_rules) do
 		local condition = rule.kind == "ip" and "sip(" .. rule.value .. ")" or "mac(" .. rule.value .. ")"
 		lines[#lines + 1] = "\t" .. condition .. " -> " .. (rule.outbound == "direct" and "direct" or "honk-proxy")

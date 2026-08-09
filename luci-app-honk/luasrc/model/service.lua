@@ -21,6 +21,7 @@ local GEO_LOCK = ASSET_DIR .. "/geo.lock.json"
 local HEALTH_ATTEMPTS = tonumber(os.getenv("HONK_HEALTH_ATTEMPTS")) or 10
 local LOG_FILE = os.getenv("HONK_LOG_PATH") or "/tmp/honk/honk.log"
 local LOG_LEVELS = { trace = true, debug = true, info = true, warn = true, error = true }
+local DEFAULT_WAN_DNS_SERVERS = "119.29.29.29 223.5.5.5"
 
 local ERROR_MESSAGES = {
 	MODE_UNKNOWN = "unknown routing mode",
@@ -60,6 +61,8 @@ local ERROR_MESSAGES = {
 	DIAL_MODE_INVALID = "dial mode is invalid",
 	LOG_LEVEL_INVALID = "log level is invalid",
 	LOG_CLEAR_FAILED = "Honk log could not be cleared",
+	LOCAL_DNS_INVALID = "local DNS settings are invalid",
+	LOCAL_DNS_SAVE_FAILED = "local DNS settings could not be saved",
 	NETWORK_DISCOVERY_FAILED = "network interface discovery failed",
 	GEO_KIND_INVALID = "Geo asset kind is invalid",
 	GEO_URL_INVALID = "Geo download URL is invalid",
@@ -161,6 +164,48 @@ local function geo_options()
 		values[kind .. "Url"] = value ~= "" and value or spec.url
 	end
 	return values, assets
+end
+
+local function resolver_nameservers(path)
+	local servers, seen = {}, {}
+	for line in (fs.readfile(path) or ""):gmatch("[^\r\n]+") do
+		local server = line:match("^%s*nameserver%s+([^%s#]+)")
+		if server and not seen[server] then
+			seen[server] = true
+			servers[#servers + 1] = server
+		end
+	end
+	return #servers > 0 and table.concat(servers, " ") or DEFAULT_WAN_DNS_SERVERS
+end
+
+local function local_dns_settings()
+	local cursor = uci.cursor()
+	local enabled = cursor:get("honk", "main", "proxy_local_dns") ~= "0"
+	local path = config.trim(sys.exec("readlink -f /etc/resolv.conf 2>/dev/null") or "")
+	if path:sub(1, 1) ~= "/" then path = "/etc/resolv.conf" end
+	local active = sys.call("grep -F " .. config.shell_quote(" " .. path .. " ") .. " /proc/self/mountinfo >/dev/null 2>&1") == 0
+	local marker = config.RUN_DIR .. "/resolv-conf.honk"
+	local owned = active and fs.access(marker) and config.trim(fs.readfile(marker) or "") == "/tmp/resolv.conf.honk" or false
+	return {
+		enabled = enabled,
+		servers = resolver_nameservers(path),
+		active = active,
+		owned = owned,
+		path = path,
+	}
+end
+
+local function local_dns_input(input)
+	if input.proxyLocalDns ~= nil and type(input.proxyLocalDns) ~= "boolean" then return nil, "LOCAL_DNS_INVALID" end
+	return { enabled = input.proxyLocalDns ~= false }, nil
+end
+
+local function write_local_dns_settings(settings)
+	local cursor = uci.cursor()
+	cursor:set("honk", "main", "proxy_local_dns", settings.enabled and "1" or "0")
+	cursor:delete("honk", "main", "local_dns_servers")
+	if not cursor:save("honk") or not cursor:commit("honk") then return false end
+	return true
 end
 
 local function valid_geo_url(value)
@@ -352,6 +397,8 @@ function M.apply_content(candidate, expected_revision, metadata)
 		if current_revision ~= expected_revision then return error_result("REVISION_CONFLICT", nil, 409) end
 		local previous = config.read()
 		local was_running = running()
+		local previous_local_dns
+		local local_dns_changed = false
 		local previous_valid = config.validate(previous)
 		if previous_valid then
 			fs.writefile(config.BACKUP, previous)
@@ -362,6 +409,15 @@ function M.apply_content(candidate, expected_revision, metadata)
 		if not replaced then
 			write_state({ stage = "write-failed", recentError = replace_error, rollback = false })
 			return error_result("WRITE_FAILED", replace_error, 500)
+		end
+		if metadata and metadata.localDns then
+			previous_local_dns = local_dns_settings()
+			if not write_local_dns_settings(metadata.localDns) then
+				config.write_atomic(previous)
+				write_state({ stage = "write-failed", recentError = ERROR_MESSAGES.LOCAL_DNS_SAVE_FAILED, rollback = false })
+				return error_result("LOCAL_DNS_SAVE_FAILED", nil, 500)
+			end
+			local_dns_changed = true
 		end
 		write_state({ stage = "service-transition", previousRevision = current_revision, candidateRevision = config.file_revision(), wasRunning = was_running, metadata = metadata or {} })
 		if metadata and metadata.noService == true then
@@ -385,6 +441,7 @@ function M.apply_content(candidate, expected_revision, metadata)
 			return { ok = true, applied = true, action = action, revision = active, running = true, rollback = false, selectionSynchronized = selection_synchronized }
 		end
 		write_state({ stage = "rollback", previousRevision = current_revision, recentError = ERROR_MESSAGES.SERVICE_FAILED, rollback = true, metadata = metadata or {} })
+		if local_dns_changed and previous_local_dns then write_local_dns_settings(previous_local_dns) end
 		if restore(previous, was_running) then
 			write_state({ stage = "restored", activeRevision = config.file_revision(), recentError = ERROR_MESSAGES.SERVICE_FAILED, rollback = true, metadata = metadata or {} })
 			return error_result("ROLLBACK", nil, 500, { rollback = true, restored = true })
@@ -453,6 +510,7 @@ function M.state(include_config)
 		rollback = last.rollback == true,
 		backupAvailable = fs.access(config.BACKUP) and true or false,
 		clashApi = clash_api_status(content),
+		localDns = local_dns_settings(),
 	}
 	if include_config then result.config = content end
 	return result
@@ -521,19 +579,27 @@ function M.apply_interfaces(input)
 	)
 	if not selected then return error_result(selection_error, nil, 422, { discovery = discovery }) end
 	selected.logLevel = log_level
+	local local_dns
+	if input.proxyLocalDns ~= nil or input.localDnsServers ~= nil then
+		local_dns, selection_error = local_dns_input(input)
+		if not local_dns then return error_result(selection_error, nil, 422) end
+	end
 	local candidate, update_error = network.update_global(content, selected)
 	if not candidate then return error_result("CONFIG_INVALID", update_error, 422) end
-	local result, status = M.apply_content(candidate, input.expectedRevision, {
+	local metadata = {
 		type = "interfaces",
 		lanDevice = selected.lan,
 		wanDevice = selected.wan,
 		dialMode = selected.dialMode,
 		logLevel = selected.logLevel,
-	})
+	}
+	if local_dns then metadata.localDns = local_dns end
+	local result, status = M.apply_content(candidate, input.expectedRevision, metadata)
 	if type(result) == "table" and result.ok then
 		result.interfaces = { lan = selected.lan, wan = selected.wan }
 		result.dialMode = selected.dialMode
 		result.logLevel = selected.logLevel
+		result.localDns = local_dns_settings()
 		result.config = config.read()
 	end
 	return result, status
