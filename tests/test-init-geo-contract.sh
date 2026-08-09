@@ -30,11 +30,34 @@ grep -F "option dnsmasq_forwarding '1'" "$repo_root/honk/files/honk.config" >/de
 grep -F 'dnsmasq-integration' "$init" >/dev/null || fail "dnsmasq lifecycle helper is missing"
 grep -F 'HONK_DNSMASQ_FORWARDING' "$init" >/dev/null || fail "dnsmasq forwarding flag is not passed to launcher"
 grep -F 'server=127.0.0.1#1053' "$repo_root/honk/files/dnsmasq-integration" >/dev/null || fail "dnsmasq Honk endpoint is missing"
+grep -F 'ensure_dns_listener_binding' "$init" >/dev/null || fail "DNS listener binding migration is missing"
 grep -F 'migrate_managed_dns_routing' "$init" >/dev/null || fail "managed DNS routing migration is missing"
 grep -F 'pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)' "$init" >/dev/null || fail "fixed resolver process rule is missing"
 grep -F 'dip(geoip: private) -> direct' "$init" >/dev/null || fail "fixed private network rule is missing"
 if grep -F 'RESOLV_HONK' "$init" >/dev/null; then fail "resolver bind-mount integration is still configured"; fi
 if grep -F 'mount --bind' "$init" >/dev/null; then fail "honk must not replace resolv.conf"; fi
+
+dns_fixture_dir="$evidence/dns-bind"
+mkdir -p "$dns_fixture_dir/run"
+legacy_config="$dns_fixture_dir/legacy.dae"
+custom_config="$dns_fixture_dir/custom.dae"
+printf '%s\n' 'global {' '}' 'dns {' $'\tupstream {' $'\t\talidns: \'udp://223.5.5.5:53\'' $'\t}' '}' >"$legacy_config"
+printf '%s\n' 'global {' '}' 'dns {' $'\tbind: \'tcp+udp://127.0.0.1:5353\'' '}' >"$custom_config"
+(
+	. "$init"
+	CONFIG="$legacy_config"
+	RUN_DIR="$dns_fixture_dir/run"
+	ensure_dns_listener_binding
+)
+grep -F "bind: 'tcp+udp://127.0.0.1:1053'" "$legacy_config" >/dev/null || fail "legacy config did not receive the Honk DNS listener"
+(
+	. "$init"
+	CONFIG="$custom_config"
+	RUN_DIR="$dns_fixture_dir/run"
+	ensure_dns_listener_binding
+)
+grep -F "bind: 'tcp+udp://127.0.0.1:5353'" "$custom_config" >/dev/null || fail "custom DNS listener binding was replaced"
+if grep -Fq "bind: 'tcp+udp://127.0.0.1:1053'" "$custom_config"; then fail "custom DNS listener binding was duplicated"; fi
 pass "init preflight, reference enumeration and TOCTOU guards"
 
 printf '%s\n' '{"schemaVersion":"honk.init-geo.v1","ok":true,"checks":["validate","actual-geo-refs","asset-path","config-sha-before-after","stale-live-cleanup"],"assertions":7}' >"$evidence/init-contract.json"

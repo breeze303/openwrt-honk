@@ -43,6 +43,55 @@ ensure_config() {
 	logger -t honk "initialized missing configuration from $DEFAULT_CONFIG"
 }
 
+dns_listener_binding_present() {
+	awk '
+		/^[[:space:]]*dns[[:space:]]*\{/ && !inside {
+			inside = 1
+			depth = 1
+			next
+		}
+		inside {
+			if ($0 ~ /^[[:space:]]*bind[[:space:]]*:/) found = 1
+			opened = gsub(/\{/, "{")
+			closed = gsub(/\}/, "}")
+			depth += opened - closed
+			if (depth <= 0) inside = 0
+		}
+		END { exit(found ? 0 : 1) }
+	' "$CONFIG"
+}
+
+ensure_dns_listener_binding() {
+	[ -r "$CONFIG" ] || return 0
+	dns_listener_binding_present && return 0
+	local temp_file
+	temp_file="$RUN_DIR/config-dns-bind.tmp.$$"
+	if grep -Eq '^[[:space:]]*dns[[:space:]]*\{' "$CONFIG"; then
+		awk '
+			/^[[:space:]]*dns[[:space:]]*\{/ && !inserted {
+				print
+				print "\tbind: '\''tcp+udp://127.0.0.1:1053'\''"
+				inserted = 1
+				next
+			}
+			{ print }
+		' "$CONFIG" >"$temp_file"
+	else
+		awk '
+			{ print }
+			END {
+				print ""
+				print "dns {"
+				print "\tbind: '\''tcp+udp://127.0.0.1:1053'\''"
+				print "}"
+			}
+		' "$CONFIG" >"$temp_file"
+	fi
+	chmod 600 "$temp_file"
+	mv "$temp_file" "$CONFIG" || return 1
+	logger -t honk "added DNS listener binding for dnsmasq forwarding"
+}
+
 migrate_managed_dns_routing() {
 	[ -r "$CONFIG" ] || return 0
 	grep -F '# luci-app-honk managed: v1 mode=' "$CONFIG" >/dev/null 2>&1 || return 0
@@ -181,6 +230,12 @@ start_service() {
 		return 1
 	fi
 	ensure_config || return 1
+	if [ "$dnsmasq_forwarding" -eq 1 ]; then
+		ensure_dns_listener_binding || {
+			logger -t honk "DNS listener binding migration failed"
+			return 1
+		}
+	fi
 	migrate_managed_dns_routing || {
 		logger -t honk "managed DNS routing migration failed"
 		return 1
