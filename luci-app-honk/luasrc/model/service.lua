@@ -15,9 +15,7 @@ local M = {}
 local STATE = os.getenv("HONK_LUCI_STATE_PATH") or config.RUN_DIR .. "/luci-state.json"
 local LOCK = os.getenv("HONK_LUCI_LOCK_PATH") or config.RUN_DIR .. "/luci-config.lock"
 local INIT = os.getenv("HONK_INIT_PATH") or "/etc/init.d/honk"
-local ASSET_DIR = os.getenv("HONK_ASSET_DIR") or "/usr/share/honk"
-local GEO_DIR = os.getenv("HONK_GEO_DIR") or "/usr/lib/honk"
-local GEO_LOCK = ASSET_DIR .. "/geo.lock.json"
+local GEO_DIR = os.getenv("HONK_GEO_DIR") or "/usr/share/v2ray"
 local HEALTH_ATTEMPTS = tonumber(os.getenv("HONK_HEALTH_ATTEMPTS")) or 10
 local LOG_FILE = os.getenv("HONK_LOG_PATH") or "/tmp/honk/honk.log"
 local LOG_LEVELS = { trace = true, debug = true, info = true, warn = true, error = true }
@@ -39,7 +37,7 @@ local ERROR_MESSAGES = {
 	REVISION_REQUIRED = "configuration revision is required",
 	REVISION_CONFLICT = "configuration changed; reload before applying",
 	CONFIG_INVALID = "candidate configuration failed validation",
-	GEO_DATA_MISSING = "required Geo data or labels are missing",
+	GEO_DATA_MISSING = "required Geo data is missing from /usr/share/v2ray",
 	WRITE_FAILED = "configuration replacement failed",
 	SERVICE_FAILED = "service did not become healthy",
 	ROLLBACK = "apply failed and the previous configuration was restored",
@@ -64,25 +62,11 @@ local ERROR_MESSAGES = {
 	LOCAL_DNS_INVALID = "local DNS settings are invalid",
 	LOCAL_DNS_SAVE_FAILED = "local DNS settings could not be saved",
 	NETWORK_DISCOVERY_FAILED = "network interface discovery failed",
-	GEO_KIND_INVALID = "Geo asset kind is invalid",
-	GEO_URL_INVALID = "Geo download URL is invalid",
-	GEO_DOWNLOAD_FAILED = "Geo asset download failed",
-	GEO_INSTALL_FAILED = "Geo asset validation or installation failed",
 }
 
-local DEFAULT_GEO = {
-	geosite = {
-		file = "geosite.dat",
-		urlOption = "geosite_url",
-		url = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/202607312254/geosite.dat",
-		labels = { "gfw", "cn", "private" },
-	},
-	geoip = {
-		file = "geoip.dat",
-		urlOption = "geoip_url",
-		url = "https://github.com/v2fly/geoip/releases/download/202607171233/geoip.dat",
-		labels = { "cn", "private" },
-	},
+local GEO_ASSETS = {
+	geosite = { file = "geosite.dat", package = "v2ray-geosite" },
+	geoip = { file = "geoip.dat", package = "v2ray-geoip" },
 }
 
 local CONNECTIVITY_TARGETS = {
@@ -130,42 +114,6 @@ local function with_lock(callback)
 	return result, status
 end
 
-local function geo_assets()
-	local assets = {}
-	local decoded = jsonc.parse(fs.readfile(GEO_LOCK) or "")
-	if type(decoded) == "table" and type(decoded.assets) == "table" then
-		for _, asset in ipairs(decoded.assets) do
-			local kind = asset.kind
-			if DEFAULT_GEO[kind] then
-				assets[kind] = {
-					file = asset.installPath and asset.installPath:match("([^/]+)$") or DEFAULT_GEO[kind].file,
-					urlOption = DEFAULT_GEO[kind].urlOption,
-					url = asset.sourceUrl or DEFAULT_GEO[kind].url,
-					labels = asset.labels or DEFAULT_GEO[kind].labels,
-					sha256 = asset.sha256,
-					size = tonumber(asset.size),
-					provider = asset.provider,
-				}
-			end
-		end
-	end
-	for kind, fallback in pairs(DEFAULT_GEO) do
-		assets[kind] = assets[kind] or fallback
-	end
-	return assets
-end
-
-local function geo_options()
-	local cursor = uci.cursor()
-	local assets = geo_assets()
-	local values = { allowCustom = cursor:get("honk", "main", "allow_custom_geo") == "1" }
-	for kind, spec in pairs(assets) do
-		local value = config.trim(cursor:get("honk", "main", spec.urlOption) or "")
-		values[kind .. "Url"] = value ~= "" and value or spec.url
-	end
-	return values, assets
-end
-
 local function resolver_nameservers(path)
 	local servers, seen = {}, {}
 	for line in (fs.readfile(path) or ""):gmatch("[^\r\n]+") do
@@ -211,49 +159,28 @@ local function write_local_dns_settings(settings)
 	return true
 end
 
-local function valid_geo_url(value)
-	return type(value) == "string" and #value <= 2048 and value:match("^https?://[^%s]+$") ~= nil
-end
-
-local function geo_requirements(mode_name, validation)
-	local requirements = mode.geo_requirements(mode_name)
-	if not requirements and type(validation) == "table" and type(validation.geo) == "table" then
-		local function labels(value)
-			local result = {}
-			for _, item in ipairs(value or {}) do
-				local label = tostring(item):match("^([^@]+)")
-				if label and label ~= "" then result[#result + 1] = label end
-			end
-			return result
-		end
-		requirements = { geoSite = labels(validation.geo.geosite), geoIp = labels(validation.geo.geoip) }
+local function geo_check()
+	local assets = {}
+	local valid = true
+	for kind, spec in pairs(GEO_ASSETS) do
+		local path = GEO_DIR .. "/" .. spec.file
+		local present = sys.call("test -s " .. config.shell_quote(path) .. " >/dev/null 2>&1") == 0
+		assets[kind] = {
+			kind = kind,
+			path = path,
+			package = spec.package,
+			status = present and "PRESENT" or "MISSING",
+			size = tonumber((sys.exec("ls -ln " .. config.shell_quote(path) .. " 2>/dev/null | awk 'NR == 1 { print $5 }'") or ""):match("%d+")) or 0,
+			ok = present,
+		}
+		valid = valid and present
 	end
-	return requirements
-end
-
-local function geo_requirement_args(requirements)
-	requirements = requirements or {}
-	local args = {}
-	if #(requirements.geoSite or {}) > 0 then args[#args + 1] = "--labels " .. config.shell_quote(table.concat(requirements.geoSite, ",")) end
-	if #(requirements.geoIp or {}) > 0 then args[#args + 1] = "--geoip-labels " .. config.shell_quote(table.concat(requirements.geoIp, ",")) end
-	if #(requirements.geoSite or {}) == 0 and #(requirements.geoIp or {}) > 0 then args[#args + 1] = "--only geoip" end
-	if #(requirements.geoIp or {}) == 0 and #(requirements.geoSite or {}) > 0 then args[#args + 1] = "--only geosite" end
-	return table.concat(args, " ")
-end
-
-local function geo_env(options)
-	return (options.allowCustom and "DAE_ALLOW_CUSTOM_GEO=1 " or "") .. "DAE_LOCATION_ASSET=" .. config.shell_quote(ASSET_DIR)
-end
-
-local function geo_check(mode_name, validation)
-	local requirements = geo_requirements(mode_name, validation)
-	if not requirements then return true, { ok = true, skipped = true } end
-	local options = geo_options()
-	local command = geo_env(options) .. " " .. config.shell_quote(config.HONK_TOOL) .. " geo capabilities --json " .. geo_requirement_args(requirements)
-	command = command .. " 2>&1"
-	local output = sys.exec(command) or ""
-	local decoded = jsonc.parse(output)
-	return type(decoded) == "table" and decoded.ok ~= false, type(decoded) == "table" and decoded or { ok = false, detail = config.redact(output) }
+	return valid, {
+		ok = valid,
+		directory = GEO_DIR,
+		provider = "openwrt-v2ray-geodata",
+		assets = assets,
+	}
 end
 
 local function diff_counts(before, after)
@@ -346,7 +273,7 @@ end
 function M.preview(input)
 	local compiled, compile_error, content = compile(input)
 	if not compiled then return error_result(compile_error, nil, 400) end
-	local geo_ok, geo = geo_check(compiled.mode)
+	local geo_ok, geo = geo_check()
 	if not geo_ok then return error_result("GEO_DATA_MISSING", nil, 422, { geo = geo }) end
 	local valid, detail, validation = config.validate(compiled.candidate)
 	if not valid then return error_result("CONFIG_INVALID", detail, 422, { validation = validation }) end
@@ -476,7 +403,7 @@ function M.apply(input)
 	local compiled, compile_error = compile(input)
 	if not compiled then return error_result(compile_error, nil, 400) end
 	if compiled.requiresTakeover and input.takeover ~= true then return error_result("ADVANCED_TAKEOVER_REQUIRED", nil, 409, { requiresTakeover = true }) end
-	local geo_ok, geo = geo_check(compiled.mode)
+	local geo_ok, geo = geo_check()
 	if not geo_ok then return error_result("GEO_DATA_MISSING", nil, 422, { geo = geo }) end
 	return M.apply_content(compiled.candidate, input.expectedRevision, { type = "mode", mode = compiled.mode, selected = compiled.selected })
 end
@@ -800,138 +727,9 @@ local function file_version(item)
 	return item
 end
 
-local function geo_diagnostics(mode_name, validation)
-	local options, assets = geo_options()
-	local requirements = geo_requirements(mode_name, validation)
-	local valid, detail = geo_check(mode_name, validation)
-	detail = type(detail) == "table" and detail or { ok = false, detail = tostring(detail or "") }
-	if detail.skipped == true then
-		local skipped = {}
-		for kind, asset in pairs(assets) do
-			skipped[kind] = { kind = kind, path = GEO_DIR .. "/" .. asset.file, status = "SKIPPED", labels = {}, labelsValid = true, size = 0, url = options[kind .. "Url"], ok = true }
-		end
-		return true, { valid = true, diskStatus = "SKIPPED", activeStatus = "SKIPPED", active = {}, allowCustom = options.allowCustom, assets = skipped, raw = detail }
-	end
-	local providers = detail.providers or {}
-	local labels = detail.labels or {}
-	local geoip_labels = detail.geoipLabels or {}
-	local function label_ok(list)
-		for _, item in ipairs(list or {}) do if item.present ~= true then return false end end
-		return true
-	end
-	local function asset_status(kind, label_list)
-		local required = kind == "geosite" and #(requirements.geoSite or {}) > 0 or kind == "geoip" and #(requirements.geoIp or {}) > 0
-		local provider = providers[kind]
-		local status = required and (provider or "MISSING") or "SKIPPED"
-		local labels_ok = label_ok(label_list)
-		local asset = assets[kind]
-		return {
-			kind = kind,
-			path = GEO_DIR .. "/" .. asset.file,
-			resolvedPath = detail.resolvedPaths and detail.resolvedPaths[kind] or nil,
-			status = status,
-			labels = label_list or {},
-			labelsValid = labels_ok,
-			sha256 = detail.hashes and detail.hashes[kind] or nil,
-			size = detail.sizes and detail.sizes[kind] or 0,
-			url = options[kind .. "Url"],
-			ok = not required or ((status == "LOYALSOLDIER_LOCKED" or status == "V2FLY_LOCKED" or status == "CUSTOM") and labels_ok),
-		}
-	end
-	local result = {
-		valid = valid,
-		diskStatus = detail.diskStatus or "MISSING",
-		activeStatus = detail.activeStatus or "STALE",
-		active = detail.live or {},
-		allowCustom = options.allowCustom,
-		assets = {
-			geosite = asset_status("geosite", labels),
-			geoip = asset_status("geoip", geoip_labels),
-		},
-		lockVersion = detail.lockVersion,
-		provider = detail.provider,
-		raw = detail,
-	}
-	result.runtimeValid = not running() or result.activeStatus == "LOYALSOLDIER_LOCKED" or result.activeStatus == "CUSTOM"
-	result.valid = result.valid and result.assets.geosite.ok and result.assets.geoip.ok and result.runtimeValid
-	return result.valid, result
-end
-
-local function geo_url_values()
-	local options = geo_options()
-	return { geosite = options.geositeUrl, geoip = options.geoipUrl, allowCustom = options.allowCustom }
-end
-
-function M.geo_settings(input)
-	if type(input) ~= "table" then return error_result("GEO_URL_INVALID", nil, 400) end
-	local assets = geo_assets()
-	local urls = {
-		geosite = config.trim(input.geositeUrl or input.geosite_url or ""),
-		geoip = config.trim(input.geoipUrl or input.geoip_url or ""),
-	}
-	for kind, value in pairs(urls) do
-		if value ~= "" and not valid_geo_url(value) then return error_result("GEO_URL_INVALID", kind .. " URL must use http or https", 422) end
-	end
-	local allow_custom = input.allowCustom == true
-	return with_lock(function()
-		local cursor = uci.cursor()
-		for kind, spec in pairs(assets) do
-			if urls[kind] ~= "" then cursor:set("honk", "main", spec.urlOption, urls[kind])
-			else cursor:delete("honk", "main", spec.urlOption) end
-		end
-		cursor:set("honk", "main", "allow_custom_geo", allow_custom and "1" or "0")
-		if not cursor:save("honk") or not cursor:commit("honk") then return error_result("GEO_INSTALL_FAILED", "Geo settings could not be saved", 500) end
-		local values = geo_url_values()
-		return { ok = true, geositeUrl = values.geosite, geoipUrl = values.geoip, allowCustom = values.allowCustom }
-	end)
-end
-
-function M.geo_download(input)
-	if type(input) ~= "table" or (input.kind ~= "geosite" and input.kind ~= "geoip") then return error_result("GEO_KIND_INVALID", nil, 400) end
-	local kind = input.kind
-	local options, assets = geo_options()
-	local spec = assets[kind]
-	local url = options[kind .. "Url"]
-	if not valid_geo_url(url) then return error_result("GEO_URL_INVALID", nil, 422) end
-	return with_lock(function()
-		local stage = "/tmp/honk-geo-" .. kind .. "-" .. tostring(os.time())
-		local staged = stage .. "/" .. spec.file
-		local target = GEO_DIR .. "/" .. spec.file
-		fs.mkdir(stage)
-		fs.mkdir(GEO_DIR)
-		local command = table.concat({
-			"/usr/bin/curl --fail --silent --show-error --location",
-			"--connect-timeout 15 --max-time 300 --retry 2 --retry-delay 1 --max-filesize 67108864",
-			"-o " .. config.shell_quote(staged), config.shell_quote(url), "2>&1",
-		}, " ")
-		local output = sys.exec(command .. "; printf '\n__HONK_STATUS:%s' $? ") or ""
-		local curl_status = tonumber(output:match("__HONK_STATUS:(%d+)$")) or 1
-		output = output:gsub("\n__HONK_STATUS:%d+$", "")
-		if curl_status ~= 0 or not fs.access(staged) then
-			os.remove(staged); os.remove(stage)
-			return error_result("GEO_DOWNLOAD_FAILED", config.redact(output), 502)
-		end
-		local labels_arg = kind == "geosite" and "--labels " or "--geoip-labels "
-		local env = "DAE_GEO_STAGING=1 " .. (options.allowCustom and "DAE_ALLOW_CUSTOM_GEO=1 " or "") .. "DAE_LOCATION_ASSET=" .. config.shell_quote(stage)
-		local validate = env .. " " .. config.shell_quote(config.HONK_TOOL) .. " geo capabilities --json --only " .. kind .. " " .. labels_arg .. config.shell_quote(table.concat(spec.labels, ",")) .. " 2>&1"
-		local validation_output = sys.exec(validate .. "; printf '\n__HONK_STATUS:%s' $? ") or ""
-		local validation_status = tonumber(validation_output:match("__HONK_STATUS:(%d+)$")) or 1
-		validation_output = validation_output:gsub("\n__HONK_STATUS:%d+$", "")
-		local validation = jsonc.parse(validation_output)
-		if validation_status ~= 0 or type(validation) ~= "table" or validation.ok == false then
-			os.remove(staged); os.remove(stage)
-			return error_result("GEO_INSTALL_FAILED", config.redact(validation_output), 422, { validation = validation })
-		end
-		local temp_target = GEO_DIR .. "/." .. spec.file .. ".download." .. tostring(os.time())
-		local copy_status = sys.call("cp " .. config.shell_quote(staged) .. " " .. config.shell_quote(temp_target) .. " >/dev/null 2>&1")
-		if copy_status ~= 0 or not fs.access(temp_target) or not fs.rename(temp_target, target) then
-			os.remove(temp_target); os.remove(staged); os.remove(stage)
-			return error_result("GEO_INSTALL_FAILED", "Geo asset could not be installed", 500)
-		end
-		os.remove(staged); os.remove(stage)
-		os.remove("/run/honk/geo-live.json")
-		return { ok = true, kind = kind, path = target, status = validation.providers and validation.providers[kind], needsRestart = running(), validation = validation }
-	end)
+local function geo_diagnostics()
+	local valid, detail = geo_check()
+	return valid, detail
 end
 
 local function clean_log_output(value)
@@ -988,9 +786,8 @@ end
 
 function M.diagnostics()
 	local content = config.read()
-	local current_mode = mode.detect(content)
 	local valid, detail, validation = config.validate(content)
-	local geo_ok, geo = geo_diagnostics(current_mode, validation)
+	local geo_ok, geo = geo_diagnostics()
 	local files = {
 		core = file_version(file_info("/usr/bin/honk-core", true)),
 		tool = file_version(file_info(config.HONK_TOOL, true)),
@@ -1001,17 +798,17 @@ function M.diagnostics()
 		launcher = file_info("/usr/libexec/honk/honk-launcher", true),
 		interfaceDiscovery = file_info("/usr/libexec/honk/interface-discovery", true),
 		quickWorker = file_info("/usr/libexec/honk/quick-transaction-worker", true),
-		geoLock = file_info(GEO_LOCK, false),
+		geosite = file_info(GEO_DIR .. "/geosite.dat", false),
+		geoip = file_info(GEO_DIR .. "/geoip.dat", false),
 	}
 	local files_valid = true
 	for _, item in pairs(files) do if item.ok ~= true then files_valid = false; break end end
 	files.valid = files_valid
-	local settings = geo_url_values()
 	return {
 		ok = true,
 		service = { running = running(), init = fs.access(INIT) and true or false },
 		config = { valid = valid, detail = detail, revision = config.file_revision(), bytes = #content },
-		geo = { valid = geo_ok, detail = geo, settings = settings },
+		geo = { valid = geo_ok, detail = geo },
 		files = files,
 		validation = validation,
 		last = read_state(),

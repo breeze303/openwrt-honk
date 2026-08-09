@@ -138,24 +138,6 @@ jobs:
             .ci-cache/openwrt/rust-host
           key: honk-sdk-toolchain-v1-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.sdk }}-${{ steps.sdk-cache-key.outputs.cache_identity }}
 
-      - name: Prepare locked Geo assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .cache/dl
-          curl --proto '=https' --tlsv1.2 --fail --location --retry 5 --retry-all-errors \
-            --output .cache/dl/loyalsoldier-geosite-202607312254.dat \
-            https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/202607312254/geosite.dat
-          curl --proto '=https' --tlsv1.2 --fail --location --retry 5 --retry-all-errors \
-            --output .cache/dl/v2fly-geoip-202607171233.dat \
-            https://github.com/v2fly/geoip/releases/download/202607171233/geoip.dat
-          printf '%s  %s\n' \
-            1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f \
-            .cache/dl/loyalsoldier-geosite-202607312254.dat | sha256sum -c -
-          printf '%s  %s\n' \
-            b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a \
-            .cache/dl/v2fly-geoip-202607171233.dat | sha256sum -c -
-
       - name: Build packages in OpenWrt SDK
         shell: bash
         env:

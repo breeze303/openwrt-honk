@@ -307,8 +307,7 @@ textarea { padding: 10px; line-height: 1.5; resize: vertical; }
 .diagnostic-item i.ok { background: var(--success); }
 .diagnostic-item i.warn { background: var(--warning); }
 .geo-panel, .runtime-files-panel { margin-top: 16px; }
-.geo-settings-grid, .geo-asset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.geo-settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.geo-asset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .checkbox-field { display: flex; align-items: center; gap: 8px; min-height: 38px; color: var(--text); }
 .checkbox-field span { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; }
 .geo-asset-grid { margin-top: 16px; }
@@ -321,7 +320,6 @@ textarea { padding: 10px; line-height: 1.5; resize: vertical; }
 .geo-asset-card dt { color: var(--muted); }
 .geo-asset-card dd { overflow-wrap: anywhere; }
 .geo-asset-card code { color: var(--muted); font-size: 11px; }
-.geo-asset-card > button { width: 100%; min-height: 34px; }
 .status-tag.ok { color: var(--success); background: var(--success-soft); }
 .status-tag.warn { color: var(--warning); background: var(--warning-soft); }
 .runtime-file-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
@@ -372,8 +370,8 @@ textarea { padding: 10px; line-height: 1.5; resize: vertical; }
   .connectivity-results { grid-template-columns: 1fr; }
   .clash-api-heading, .clash-api-actions, .interface-heading { align-items: stretch; flex-direction: column; }
   .clash-api-actions button, .interface-heading button { width: 100%; }
-  .network-grid, .geo-settings-grid, .geo-asset-grid, .runtime-file-list { grid-template-columns: 1fr; }
-  .section-heading, .geo-settings-actions { align-items: stretch; flex-direction: column; }
+  .network-grid, .geo-asset-grid, .runtime-file-list { grid-template-columns: 1fr; }
+  .section-heading { align-items: stretch; flex-direction: column; }
   .section-heading .secondary-button { width: 100%; }
   .preview-grid { grid-template-columns: 1fr; }
   .modal-backdrop { align-items: end; padding: 0; }

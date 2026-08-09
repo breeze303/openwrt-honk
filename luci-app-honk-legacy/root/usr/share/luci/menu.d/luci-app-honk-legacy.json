@@ -87,10 +87,6 @@
 		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_quick_apply" },
 		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
 	},
-	"admin/services/honk-legacy/api/geo_repair": {
-		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_geo_repair" },
-		"depends": { "acl": [ "luci-app-honk-legacy", "luci-app-honk-legacy.quick-setup" ] }
-	},
 	"admin/services/honk-legacy/api/transaction_status": {
 		"action": { "type": "call", "module": "luci.controller.honk_legacy", "function": "api_transaction_status" },
 		"depends": { "acl": [ "luci-app-honk-legacy" ] }

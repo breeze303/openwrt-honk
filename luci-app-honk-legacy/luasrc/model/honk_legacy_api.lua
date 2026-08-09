@@ -10,6 +10,7 @@ local RUN_DIR = os.getenv("HONK_RUN_DIR") or "/var/run/honk"
 local MAX_CONFIG = 1048576
 local APP_DIR = "/www/luci-static/resources/honk-legacy/app"
 local HONK_TOOL = os.getenv("HONK_TOOL_PATH") or "/usr/bin/honk-tool"
+local GEO_DIR = os.getenv("HONK_GEO_DIR") or "/usr/share/v2ray"
 
 local function shell_quote(value)
 	return "'" .. tostring(value or ""):gsub("'", "'\\''") .. "'"
@@ -880,17 +881,22 @@ local function quick_valid_interfaces(discovery, lan, wan)
 	return { lan = l, wan = w }
 end
 
-local function quick_geo_gate(preset)
-	if preset == "direct" then return true, nil, nil end
-	local labels = (preset == "gfwlist" and "gfw,private" or preset == "china-direct" and "cn,private" or "private")
-	local output = sys.exec("DAE_LOCATION_ASSET=/usr/share/honk " .. shell_quote(HONK_TOOL) .. " geo capabilities --json --labels " .. labels .. " --geoip-labels cn 2>/dev/null") or ""
-	local value = jsonc.parse(output)
-	if type(value) ~= "table" or value.ok == false then
-		local status = type(value) == "table" and value.diskStatus or "MISSING"
-		if status == "V2FLY_GFW_UNSUPPORTED" then return nil, "GEO_V2FLY_UNSUPPORTED", value end
-		if status == "TAMPERED" then return nil, "GEO_TAMPERED", value end
-		return nil, "GEO_LABEL_MISSING", value
-	end
+local function geo_state()
+	local geosite = sys.call("test -s " .. shell_quote(GEO_DIR .. "/geosite.dat") .. " >/dev/null 2>&1") == 0
+	local geoip = sys.call("test -s " .. shell_quote(GEO_DIR .. "/geoip.dat") .. " >/dev/null 2>&1") == 0
+	local ok = geosite and geoip
+	return {
+		ok = ok,
+		diskStatus = ok and "PRESENT" or "MISSING",
+		activeStatus = ok and "PRESENT" or "MISSING",
+		configuredPath = GEO_DIR,
+		packages = { geosite = "v2ray-geosite", geoip = "v2ray-geoip" },
+	}
+end
+
+local function quick_geo_gate()
+	local value = geo_state()
+	if not value.ok then return nil, "GEO_DATA_MISSING", value end
 	return true, nil, value
 end
 
@@ -1019,8 +1025,7 @@ function M.quick_state()
 	for _, item in ipairs(M.model(content).model.subscriptions or {}) do
 		subscriptions[#subscriptions + 1] = { name = item.name, updateInterval = item.updateInterval, enabled = item.enabled }
 	end
-	local geo = jsonc.parse(sys.exec("DAE_LOCATION_ASSET=/usr/share/honk " .. shell_quote(HONK_TOOL) .. " geo capabilities --json 2>/dev/null") or "")
-	return { ok = true, marker = partition and partition.marker or false, advancedOwned = partition and partition.advanced or true, reasons = partition and partition.reasons or { "PARTITION_FAILED" }, revision = revision(content), running = sys.call("pidof honk-core >/dev/null 2>&1") == 0, discovery = discovery, subscriptions = subscriptions, geo = geo or { ok = false, diskStatus = "MISSING", activeStatus = "STALE" }, presets = { { id = "gfwlist", requiresGeo = true }, { id = "china-direct", requiresGeo = true }, { id = "global", requiresGeo = false }, { id = "direct", requiresGeo = false } } }
+	return { ok = true, marker = partition and partition.marker or false, advancedOwned = partition and partition.advanced or true, reasons = partition and partition.reasons or { "PARTITION_FAILED" }, revision = revision(content), running = sys.call("pidof honk-core >/dev/null 2>&1") == 0, discovery = discovery, subscriptions = subscriptions, geo = geo_state(), presets = { { id = "gfwlist", requiresGeo = true }, { id = "china-direct", requiresGeo = true }, { id = "global", requiresGeo = true }, { id = "direct", requiresGeo = true } } }
 end
 
 function M.quick_preview(input)
@@ -1085,14 +1090,6 @@ function M.quick_apply(input)
 		end
 		return error_response("TRANSACTION_WORKER_UNAVAILABLE", "Quick Setup transaction worker is unavailable", 503)
 	end)()
-end
-
-function M.geo_repair(confirm)
-	if confirm ~= true then return error_response("GEO_REPAIR_CONFIRM_REQUIRED", "explicit repair confirmation is required") end
-	local output = sys.exec(shell_quote(HONK_TOOL) .. " geo repair --json --confirm 2>&1") or ""
-	local parsed = jsonc.parse(output)
-	if type(parsed) == "table" and parsed.ok then return parsed end
-	return error_response("GEO_REPAIR_FAILED", quick_redact(trim(output)), 500)
 end
 
 function M.transaction_status()

@@ -86,23 +86,9 @@ Building either LuCI dashboard requires Node.js 22 and npm. Rust and the eBPF li
 
 ### OpenWrt runtime dependencies
 
-The `honk` package declares `ca-bundle`, `ip-full`, `tc-full`, `nsenter`, `libstdcpp`, `jq`, `kmod-sched-core`, `kmod-sched-bpf`, and `kmod-veth`. The current LuCI package adds `luci-base`, `luci-compat`, and `curl`; the legacy package uses `luci-base` and `luci-compat`. The target kernel must provide `CONFIG_BPF`, `CONFIG_BPF_SYSCALL`, `CONFIG_BPF_JIT`, `CONFIG_CGROUP_BPF`, `CONFIG_NET_CLS_BPF`, `CONFIG_NET_SCH_INGRESS`, `CONFIG_NET_CLS_ACT`, `CONFIG_NET_NS`, `CONFIG_VETH`, and `CONFIG_DEBUG_INFO_BTF`.
+The `honk` package declares `ca-bundle`, `ip-full`, `tc-full`, `nsenter`, `libstdcpp`, `jq`, `kmod-sched-core`, `kmod-sched-bpf`, `kmod-veth`, `v2ray-geoip`, and `v2ray-geosite`. The current LuCI package adds `luci-base`, `luci-compat`, and `curl`; the legacy package uses `luci-base` and `luci-compat`. The target kernel must provide `CONFIG_BPF`, `CONFIG_BPF_SYSCALL`, `CONFIG_BPF_JIT`, `CONFIG_CGROUP_BPF`, `CONFIG_NET_CLS_BPF`, `CONFIG_NET_SCH_INGRESS`, `CONFIG_NET_CLS_ACT`, `CONFIG_NET_NS`, `CONFIG_VETH`, and `CONFIG_DEBUG_INFO_BTF`.
 
-GeoSite and GeoIP are provisioned from the exact inputs in `locks/geo.lock.json`. Honk owns `/usr/lib/honk` and `/usr/share/honk`; it has no runtime dependency on a target package manager's `v2ray-*` Geo data. To prepare the locked assets in a checkout:
-
-~~~sh
-mkdir -p .cache/dl
-curl --fail --location -o .cache/dl/loyalsoldier-geosite-202607312254.dat \
-  https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/202607312254/geosite.dat
-curl --fail --location -o .cache/dl/v2fly-geoip-202607171233.dat \
-  https://github.com/v2fly/geoip/releases/download/202607171233/geoip.dat
-printf '%s  %s\n' \
-  1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f \
-  .cache/dl/loyalsoldier-geosite-202607312254.dat | sha256sum -c -
-printf '%s  %s\n' \
-  b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a \
-  .cache/dl/v2fly-geoip-202607171233.dat | sha256sum -c -
-~~~
+OpenWrt owns Geo data through `v2ray-geosite` and `v2ray-geoip`. The package manager supplies `/usr/share/v2ray/geosite.dat` and `/usr/share/v2ray/geoip.dat` when Honk is installed. Honk does not download, bundle, modify, or pin these files during a build or at runtime.
 
 ## Build
 
@@ -176,16 +162,9 @@ The new page is available at `/cgi-bin/luci/admin/services/honk`; the preserved 
 
 Quick Setup is the first Honk view. It uses the existing subscription and node data and writes only the single `/etc/honk/config.dae` runtime configuration. The four presets are GFWList, China Direct, Global Proxy, and Direct. Each preview shows the selected source groups, discovered LAN/WAN devices, route/DNS projection, revision, and a server-generated candidate digest before an apply is accepted. The Advanced editor remains available; an advanced-owned configuration requires an explicit replacement confirmation.
 
-The package ships the locked assets under Honk-owned paths:
+GeoSite and GeoIP are loaded directly from `/usr/share/v2ray`. The Diagnostics page reports their presence, package ownership, path, and size. Install or update `v2ray-geosite` and `v2ray-geoip` through the OpenWrt package manager to manage those files.
 
-| Asset | Locked input | Installed payload | Public loading path |
-| --- | --- | --- | --- |
-| GeoSite | Loyalsoldier release `202607312254`, SHA-256 `1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f` | `/usr/lib/honk/geosite.dat` | `/usr/share/honk/geosite.dat` |
-| GeoIP | V2Fly release `202607171233`, SHA-256 `b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a` | `/usr/lib/honk/geoip.dat` | `/usr/share/honk/geoip.dat` |
-
-`/usr/share/honk/geo.lock.json` and `/run/honk/geo-assets.json` record provenance and the active receipt. The new Diagnostics page reports GeoSite and GeoIP files, hashes, labels, and the live receipt separately, and allows each URL to be edited before downloading one or both assets. Locked mode requires the pinned SHA-256; enabling custom Geo mode accepts format and label checks and reports `CUSTOM`. Downloads use a temporary file and atomic replacement and never touch `/usr/share/v2ray`; a running service needs an explicit restart after an update.
-
-Quick mutations are handled by `/usr/libexec/honk/quick-transaction-worker`. It keeps the previous bytes in a root-only sidecar, records each durable stage, and restores the prior running or stopped state after a failed restart, subscription wait, or probe. A failed recovery is reported as `degraded` and remains visible for operator action. Direct can be applied without a proxy subscription, while proxy presets require a non-empty, validated source group and the Geo/DNS/interface gates. Geo download URLs and the custom-data policy are stored in `/etc/config/honk`.
+Quick mutations are handled by `/usr/libexec/honk/quick-transaction-worker`. It keeps the previous bytes in a root-only sidecar, records each durable stage, and restores the prior running or stopped state after a failed restart, subscription wait, or probe. A failed recovery is reported as `degraded` and remains visible for operator action. Direct can be applied without a proxy subscription, while proxy presets require a non-empty, validated source group and the Geo/DNS/interface gates.
 
 ## Runtime Paths
 
@@ -320,7 +299,7 @@ git diff --check
 cd luci-app-honk/ui && npm ci && npm run build
 ~~~
 
-The package checks verify source and patch digests, locked Geo payloads, shell/Lua syntax, RPC/menu manifests, generated assets, and the Quick Setup/transaction contracts used by the LuCI bridge.
+The package checks verify source and patch digests, OpenWrt Geo package integration, shell/Lua syntax, RPC/menu manifests, generated assets, and the Quick Setup/transaction contracts used by the LuCI bridge.
 
 ## Upstream Documentation
 

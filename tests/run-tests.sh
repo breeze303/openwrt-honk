@@ -19,10 +19,11 @@ done < <(jq -r '.source.patchDigests[] | [.path, .sha256] | @tsv' locks/source.l
 
 tar -xzf "$archive_path" -C "$tmp"
 source_dir="$tmp/$source_top"
-while IFS= read -r patch_file; do
+mapfile -t patch_files < <(jq -r '.source.patchDigests[].path' locks/source.lock.json)
+for patch_file in "${patch_files[@]}"; do
 	patch --dry-run -d "$source_dir" -p1 <"$patch_file" >/dev/null
 	patch -d "$source_dir" -p1 <"$patch_file" >/dev/null
-done < <(jq -r '.source.patchDigests[].path' locks/source.lock.json)
+done
 grep -F 'Validate(validate::ValidateArgs)' "$source_dir/crates/honk-tool/src/main.rs" >/dev/null
 grep -F 'pub json: bool' "$source_dir/crates/honk-tool/src/bpf.rs" >/dev/null
 grep -F 'pub sample_ms: u64' "$source_dir/crates/honk-tool/src/bpf.rs" >/dev/null
@@ -49,12 +50,10 @@ grep -F 'BPF_RUST_TOOLCHAIN?=nightly-2026-07-20' honk/Makefile >/dev/null
 grep -F 'PKG_BUILD_DEPENDS:=rust/host' honk/Makefile >/dev/null
 grep -F 'PKG_SOURCE_URL:=https://github.com/Glassyiris/honk/archive' honk/source.mk >/dev/null
 grep -F 'cargo build --locked --release' honk/Makefile >/dev/null
-grep -F 'GEO_SITE_CACHE' honk/Makefile >/dev/null
+grep -F '+v2ray-geoip +v2ray-geosite' honk/Makefile >/dev/null
 grep -F 'DAE_LOCATION_ASSET' honk/files/honk.init >/dev/null
-grep -F 'DAE_ALLOW_CUSTOM_GEO' honk/files/honk.init >/dev/null
-grep -F 'write_live_receipt' honk/files/honk.init >/dev/null
 test "$(grep -Ec '^[[:space:]]*procd_set_param env' honk/files/honk.init)" -eq 1
-grep -F '"DAE_LOCATION_ASSET=$ASSET_DIR"' honk/files/honk.init >/dev/null
+grep -F '"DAE_LOCATION_ASSET=$GEO_DIR"' honk/files/honk.init >/dev/null
 grep -F '"HONK_DNSMASQ_FORWARDING=$dnsmasq_forwarding"' honk/files/honk.init >/dev/null
 grep -F '"HONK_SUBSCRIPTION_CACHE_TTL=$SUBSCRIPTION_CACHE_TTL"' honk/files/honk.init >/dev/null
 grep -F 'dnsmasq-integration' honk/Makefile >/dev/null
@@ -65,9 +64,10 @@ if grep -Fq 'stat -c %s' luci-app-honk/luasrc/model/service.lua; then
 	echo 'runtime diagnostics must use BusyBox base commands' >&2
 	exit 1
 fi
-grep -F 'option geosite_url' honk/files/honk.config >/dev/null
-grep -F 'option geoip_url' honk/files/honk.config >/dev/null
-grep -F 'option allow_custom_geo' honk/files/honk.config >/dev/null
+if rg -n 'geo(site|ip)_url|allow_custom_geo' honk/files/honk.config luci-app-honk >/dev/null; then
+	echo 'Geo URL settings must not be part of the Honk package contract' >&2
+	exit 1
+fi
 grep -F 'pub fn parse_subscription_content' honk/patches/100-openwrt-main-contracts.patch >/dev/null
 grep -F 'openwrt-24.10' .github/workflows/build-packages.yml >/dev/null
 grep -F 'openwrt-25.12' .github/workflows/build-packages.yml >/dev/null
@@ -76,7 +76,10 @@ grep -F 'package_ext: apk' .github/workflows/build-packages.yml >/dev/null
 grep -F 'schedule:' .github/workflows/update-honk-source.yml >/dev/null
 grep -F 'refs/heads/main' .github/workflows/update-honk-source.yml >/dev/null
 grep -F 'update-honk-source.sh' .github/workflows/update-honk-source.yml >/dev/null
-grep -F 'Prepare locked Geo assets' .github/workflows/build-packages.yml >/dev/null
+if rg -n 'locked Geo|loyalsoldier-geosite|v2fly-geoip' .github/workflows; then
+	echo 'CI must not acquire Geo data for Honk builds' >&2
+	exit 1
+fi
 grep -F 'package/luci-app-honk/compile' .github/scripts/build-packages-in-sdk.sh >/dev/null
 grep -F 'package/honk/download' .github/scripts/build-packages-in-sdk.sh >/dev/null
 grep -F 'package/honk/compile' .github/scripts/build-packages-in-sdk.sh >/dev/null
@@ -87,7 +90,7 @@ grep -F -- '--prefer-offline' .github/scripts/provision-ui-cache.sh >/dev/null
 grep -F 'cargo fetch --locked' .github/workflows/ci.yml >/dev/null
 grep -F 'cargo build --locked --manifest-path "$source_dir/Cargo.toml" -p honk-tool' .github/workflows/ci.yml >/dev/null
 grep -F 'ripgrep clang llvm libclang-dev pkg-config cmake' .github/workflows/ci.yml >/dev/null
-grep -F 'locks/geo.lock.json' .github/workflows/ci.yml >/dev/null
+test ! -e locks/geo.lock.json
 grep -F 'luci-app-honk-legacy/ui/package-lock.json --cache .cache/npm' .github/workflows/ci.yml >/dev/null
 test ! -e .github/workflows/build-honk-binaries.yml
 test ! -e .github/scripts/build-honk-binaries.sh
@@ -119,8 +122,6 @@ jq empty luci-app-honk-legacy/root/usr/share/rpcd/acl.d/luci-app-honk-legacy.jso
 jq empty luci-app-honk-legacy/root/usr/share/luci/menu.d/luci-app-honk-legacy.json
 grep -F '"path": "honk/dashboard"' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
 grep -F '"function": "api_preview"' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
-grep -F 'geo_settings' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
-grep -F 'geo_download' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
 grep -F '"path": "honk_legacy/dashboard"' luci-app-honk-legacy/root/usr/share/luci/menu.d/luci-app-honk-legacy.json >/dev/null
 grep -F '"function": "api_dashboard_prepare"' luci-app-honk-legacy/root/usr/share/luci/menu.d/luci-app-honk-legacy.json >/dev/null
 
@@ -162,10 +163,8 @@ if grep -Fq 'service-controls' luci-app-honk/ui/src/views/DiagnosticsView.vue; t
 	echo 'diagnostics must use the global service controls' >&2
 	exit 1
 fi
-grep -F 'function M.geo_settings' luci-app-honk/luasrc/model/service.lua >/dev/null
-grep -F 'function M.geo_download' luci-app-honk/luasrc/model/service.lua >/dev/null
 grep -F 'runtimeCore' luci-app-honk/ui/src/i18n.ts >/dev/null
-grep -F 'geoDownload' luci-app-honk/ui/src/api.ts >/dev/null
+grep -F 'geoPackage' luci-app-honk/ui/src/i18n.ts >/dev/null
 grep -F 'geo-asset-grid' luci-app-honk/ui/src/views/DiagnosticsView.vue >/dev/null
 grep -F "id: 'logs' as const" luci-app-honk/ui/src/App.vue >/dev/null
 grep -F "china-proxy" luci-app-honk/ui/src/views/HomeView.vue >/dev/null

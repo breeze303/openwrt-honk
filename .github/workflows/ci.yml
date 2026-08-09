@@ -24,17 +24,6 @@ jobs:
           curl --proto '=https' --tlsv1.2 --fail --location --retry 5 --retry-all-errors \
             --output "$archive_path" "$archive_url"
           printf '%s  %s\n' "$archive_sha256" "$archive_path" | sha256sum -c -
-      - name: Restore locked Geo assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS=$'\t' read -r cache_path source_url sha256 size; do
-            mkdir -p "$(dirname "$cache_path")"
-            curl --proto '=https' --tlsv1.2 --fail --location --retry 5 --retry-all-errors \
-              --output "$cache_path" "$source_url"
-            printf '%s  %s\n' "$sha256" "$cache_path" | sha256sum -c -
-            test "$(stat -c '%s' "$cache_path")" = "$size"
-          done < <(jq -er -r '.assets[] | [.cachePath, .sourceUrl, .sha256, (.size | tostring)] | @tsv' locks/geo.lock.json)
       - name: Cache Cargo downloads
         uses: actions/cache@v6
         with:
@@ -56,9 +45,10 @@ jobs:
           tar -xzf "$archive_path" -C "$work_root"
           source_dir="$work_root/$source_top"
           test -d "$source_dir"
-          while IFS= read -r patch_file; do
+          mapfile -t patch_files < <(jq -er -r '.source.patchDigests[].path' locks/source.lock.json)
+          for patch_file in "${patch_files[@]}"; do
             patch -d "$source_dir" -p1 <"$patch_file" >/dev/null
-          done < <(jq -er -r '.source.patchDigests[].path' locks/source.lock.json)
+          done
           rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
           cargo fetch --locked --manifest-path "$source_dir/Cargo.toml"
           cargo build --locked --manifest-path "$source_dir/Cargo.toml" -p honk-tool

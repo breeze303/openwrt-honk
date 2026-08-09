@@ -17,13 +17,16 @@ config="$tmp/config.dae"
 state="$tmp/state"
 tool="$tmp/honk-tool"
 init="$tmp/honk-init"
-mkdir -p "$state"
+geo_dir="$tmp/v2ray"
+mkdir -p "$state" "$geo_dir"
+printf 'fixture geosite\n' >"$geo_dir/geosite.dat"
+printf 'fixture geoip\n' >"$geo_dir/geoip.dat"
 printf 'previous-config-bytes\n' >"$config"
 chmod 600 "$config"
 cat >"$tool" <<'SH'
 #!/bin/sh
 case "${1:-}" in
-  validate|geo) printf '{"ok":true}\n'; exit 0 ;;
+  validate) printf '{"ok":true}\n'; exit 0 ;;
   *) exit 64 ;;
 esac
 SH
@@ -41,7 +44,7 @@ exit 0
 SH
 chmod 700 "$tool" "$init"
 export HONK_QUICK_ALLOW_NONROOT=1 HONK_QUICK_CONFIG="$config" HONK_QUICK_STATE_DIR="$state"
-export HONK_QUICK_TOOL="$tool" HONK_QUICK_INIT="$init" HONK_QUICK_INIT_LOG="$tmp/init.log" HONK_QUICK_INIT_FAIL_ONCE_FILE="$tmp/fail-once"
+export HONK_QUICK_TOOL="$tool" HONK_QUICK_INIT="$init" HONK_QUICK_GEO_DIR="$geo_dir" HONK_QUICK_INIT_LOG="$tmp/init.log" HONK_QUICK_INIT_FAIL_ONCE_FILE="$tmp/fail-once"
 
 candidate="$tmp/candidate"
 printf 'candidate-config-bytes\n' >"$candidate"

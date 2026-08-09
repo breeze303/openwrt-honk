@@ -86,23 +86,9 @@ tar --zstd -xf /tmp/bpf-linker.tar.zst -C "$HOME/.cargo/bin"
 
 ### OpenWrt 运行依赖
 
-`honk` 软件包声明 `ca-bundle`、`ip-full`、`tc-full`、`nsenter`、`libstdcpp`、`jq`、`kmod-sched-core`、`kmod-sched-bpf` 和 `kmod-veth`。新版 LuCI 还需要 `luci-base`、`luci-compat`、`curl`；旧版 LuCI 需要 `luci-base` 和 `luci-compat`。目标内核需要提供 `CONFIG_BPF`、`CONFIG_BPF_SYSCALL`、`CONFIG_BPF_JIT`、`CONFIG_CGROUP_BPF`、`CONFIG_NET_CLS_BPF`、`CONFIG_NET_SCH_INGRESS`、`CONFIG_NET_CLS_ACT`、`CONFIG_NET_NS`、`CONFIG_VETH` 和 `CONFIG_DEBUG_INFO_BTF`。
+`honk` 软件包声明 `ca-bundle`、`ip-full`、`tc-full`、`nsenter`、`libstdcpp`、`jq`、`kmod-sched-core`、`kmod-sched-bpf`、`kmod-veth`、`v2ray-geoip` 和 `v2ray-geosite`。新版 LuCI 还需要 `luci-base`、`luci-compat`、`curl`；旧版 LuCI 需要 `luci-base` 和 `luci-compat`。目标内核需要提供 `CONFIG_BPF`、`CONFIG_BPF_SYSCALL`、`CONFIG_BPF_JIT`、`CONFIG_CGROUP_BPF`、`CONFIG_NET_CLS_BPF`、`CONFIG_NET_SCH_INGRESS`、`CONFIG_NET_CLS_ACT`、`CONFIG_NET_NS`、`CONFIG_VETH` 和 `CONFIG_DEBUG_INFO_BTF`。
 
-GeoSite、GeoIP 只使用 `locks/geo.lock.json` 中的精确输入。Honk 自己拥有 `/usr/lib/honk` 和 `/usr/share/honk`，不依赖目标包管理器提供的 `v2ray-*` Geo 包。在源码检出目录准备锁定资源：
-
-~~~sh
-mkdir -p .cache/dl
-curl --fail --location -o .cache/dl/loyalsoldier-geosite-202607312254.dat \
-  https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/202607312254/geosite.dat
-curl --fail --location -o .cache/dl/v2fly-geoip-202607171233.dat \
-  https://github.com/v2fly/geoip/releases/download/202607171233/geoip.dat
-printf '%s  %s\n' \
-  1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f \
-  .cache/dl/loyalsoldier-geosite-202607312254.dat | sha256sum -c -
-printf '%s  %s\n' \
-  b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a \
-  .cache/dl/v2fly-geoip-202607171233.dat | sha256sum -c -
-~~~
+GeoSite 与 GeoIP 由 OpenWrt 的 `v2ray-geosite`、`v2ray-geoip` 软件包安装到 `/usr/share/v2ray/geosite.dat`、`/usr/share/v2ray/geoip.dat`。Honk 在构建和运行期间均不下载、打包、修改或锁定 Geo 数据；用户可通过 OpenWrt 软件包管理器自行安装和更新这些数据包。
 
 ## 构建
 
@@ -176,16 +162,9 @@ LuCI 页面地址：
 
 Quick Setup 永远是 Honk 的首个页面。它复用现有订阅和节点数据，只写入唯一的 `/etc/honk/config.dae` 运行配置。四个预设为 GFWList、中国直连、全局代理和直连。每次预览都会展示选中的源组、发现到的 LAN/WAN 设备、路由/DNS 投影、版本以及服务端生成的候选摘要，确认后才允许应用。高级编辑器仍然保留；高级配置被识别为用户拥有时，替换必须显式确认。
 
-软件包把锁定资产安装在 Honk 自己拥有的路径：
+GeoSite 与 GeoIP 直接从 `/usr/share/v2ray` 读取。新版诊断页会分别显示文件存在状态、所属 OpenWrt 软件包、路径和文件大小；使用 OpenWrt 软件包管理器安装或更新 `v2ray-geosite`、`v2ray-geoip` 即可管理这些数据。
 
-| 资产 | 锁定输入 | 安装 payload | 对外加载路径 |
-| --- | --- | --- | --- |
-| GeoSite | Loyalsoldier release `202607312254`，SHA-256 `1f3a743e8e30152a870a1674792af3976361436dcb1f510a43c499d430f6b13f` | `/usr/lib/honk/geosite.dat` | `/usr/share/honk/geosite.dat` |
-| GeoIP | V2Fly release `202607171233`，SHA-256 `b71d1999439dde2de2d2b6844a2befa50c50211ff739785c005ca7c230a17d6a` | `/usr/lib/honk/geoip.dat` | `/usr/share/honk/geoip.dat` |
-
-`/usr/share/honk/geo.lock.json` 和 `/run/honk/geo-assets.json` 记录来源与生效 receipt。新版诊断页会分别显示 GeoSite、GeoIP 的文件、哈希、标签和 live receipt 状态，并允许编辑地址后单独下载或全部下载。默认下载仍要求匹配锁定 SHA-256；打开“允许自定义 Geo 数据”后，会改为格式和标签校验并显示 `CUSTOM` 状态。下载使用临时文件和原子替换，不触碰 `/usr/share/v2ray`；服务运行时更新后需要显式重启 Honk。
-
-Quick mutation 由 `/usr/libexec/honk/quick-transaction-worker` 处理。它把旧配置字节保存到 root-only sidecar，记录每个可恢复阶段；重启、订阅等待或 probe 失败时恢复之前的运行或停止状态。恢复本身失败会明确标记为 `degraded`，等待运维处理。直连预设不要求代理订阅即可应用；其他预设必须有非空且已校验的源组，并通过 Geo、DNS、接口门禁。Geo 下载地址和自定义策略保存在 `/etc/config/honk`。
+Quick mutation 由 `/usr/libexec/honk/quick-transaction-worker` 处理。它把旧配置字节保存到 root-only sidecar，记录每个可恢复阶段；重启、订阅等待或 probe 失败时恢复之前的运行或停止状态。恢复本身失败会明确标记为 `degraded`，等待运维处理。直连预设不要求代理订阅即可应用；其他预设必须有非空且已校验的源组，并通过 Geo、DNS、接口门禁。
 
 ## 运行路径
 
@@ -304,7 +283,7 @@ git diff --check
 cd luci-app-honk/ui && npm ci && npm run build
 ~~~
 
-检查脚本会校验源码和补丁摘要、锁定 Geo payload、Shell/Lua 语法、RPC/menu 清单、构建资源以及 LuCI 桥接使用的 Quick Setup/事务契约。
+检查脚本会校验源码和补丁摘要、OpenWrt Geo 软件包集成、Shell/Lua 语法、RPC/menu 清单、构建资源以及 LuCI 桥接使用的 Quick Setup/事务契约。
 
 ## 上游文档
 

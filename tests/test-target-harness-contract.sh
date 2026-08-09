@@ -13,7 +13,7 @@ bash -n "$repo_root/.github/scripts/target-smoke.sh"
 sh -n "$repo_root/.github/scripts/target-smoke-remote.sh"
 grep -F 'TARGET_DATA_PLANE_REQUIRES_ISOLATED_FIXTURE' "$repo_root/tests/quick-setup-target-harness.sh" >/dev/null
 grep -F 'networkFixture:"not-installed"' "$repo_root/.github/scripts/target-smoke-remote.sh" >/dev/null
-grep -F 'V2FLY_GFW_UNSUPPORTED' "$repo_root/.github/scripts/target-smoke-remote.sh" >/dev/null
+grep -F 'privateGeoPathsAbsent' "$repo_root/.github/scripts/target-smoke-remote.sh" >/dev/null
 
 set +e
 HONK_TARGET_SSH='' "$repo_root/tests/quick-setup-target-harness.sh" --evidence "$tmp/missing"

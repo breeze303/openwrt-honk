@@ -10,6 +10,7 @@ SIDECAR=$STATE_DIR/quick-transaction.previous
 LOCK=$STATE_DIR/quick-transaction.lock
 HONK_TOOL=${HONK_QUICK_TOOL:-/usr/bin/honk-tool}
 HONK_INIT=${HONK_QUICK_INIT:-/etc/init.d/honk}
+GEO_DIR=${HONK_QUICK_GEO_DIR:-/usr/share/v2ray}
 
 json_error() {
 	printf '{"ok":false,"error":{"code":"%s","message":"%s"}}\n' "$1" "$2"
@@ -122,7 +123,7 @@ apply_candidate() {
 	write_journal waiting-subscription
 	write_journal probing
 	if [ -x "$HONK_TOOL" ] && [ -n "${HONK_QUICK_PROBE:-}" ]; then
-		if ! "$HONK_TOOL" geo capabilities --json >/dev/null 2>&1; then
+		if [ ! -s "$GEO_DIR/geosite.dat" ] || [ ! -s "$GEO_DIR/geoip.dat" ]; then
 			write_journal rollback-in-progress
 			cp "$SIDECAR" "$CONFIG"; chmod 600 "$CONFIG"; sync_parent "$CONFIG"
 			if restore_service_state "$previous_running"; then

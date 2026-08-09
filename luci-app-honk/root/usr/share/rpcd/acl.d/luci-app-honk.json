@@ -9,7 +9,7 @@
 				"/etc/config/honk",
 				"/run/honk/**",
 				"/tmp/honk/honk.log",
-				"/usr/share/honk/**"
+				"/usr/share/v2ray/**"
 			],
 			"ubus": {
 				"service": [ "list" ],
@@ -24,7 +24,6 @@
 			"/etc/honk/config.dae",
 			"/etc/honk/config.dae.last-good",
 			"/tmp/honk/honk.log",
-			"/usr/lib/honk/**",
 				"/run/honk/luci-*.json",
 				"/run/honk/luci-*.lock"
 			],

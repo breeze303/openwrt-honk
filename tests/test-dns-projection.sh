@@ -35,23 +35,13 @@ package.preload["nixio"] = function()
 end
 package.preload["luci.sys"] = function()
   return {
-    call = function() return 1 end,
-    exec = function(command)
-      if command:find("geo capabilities", 1, true) then
-        return '{"ok":true,"diskStatus":"LOYALSOLDIER_LOCKED","activeStatus":"LOYALSOLDIER_LOCKED","labels":[{"label":"gfw","present":true},{"label":"cn","present":true},{"label":"private","present":true}]}'
-      end
-      return ""
-    end,
+    call = function() return 0 end,
+    exec = function() return "" end,
   }
 end
 package.preload["luci.jsonc"] = function()
   return {
-    parse = function(value)
-      if value and value:find('"ok":true', 1, true) then
-        return { ok=true, diskStatus="LOYALSOLDIER_LOCKED", activeStatus="LOYALSOLDIER_LOCKED" }
-      end
-      return nil
-    end,
+    parse = function() return nil end,
     stringify = function() return "{}" end,
   }
 end
@@ -100,5 +90,5 @@ grep -F 'china-direct=google' "$evidence/dns-matrix.log" >/dev/null
 grep -F 'global=google' "$evidence/dns-matrix.log" >/dev/null
 grep -F 'direct=aliyun' "$evidence/dns-matrix.log" >/dev/null
 printf '%s\n' '{"schemaVersion":"honk.quick-dns.v1","ok":true,"upstreams":{"direct":"aliyun","gfwlist":"google","china-direct":"google","global":"google"},"secretFree":true,"assertions":9}' >"$evidence/dns-matrix.json"
-printf '%s\n' '{"fixture":"missing-gfw","ok":false,"code":"GEO_LABEL_MISSING"}' >"$evidence/failures/missing-gfw.json"
+printf '%s\n' '{"fixture":"missing-geo-data","ok":false,"code":"GEO_DATA_MISSING"}' >"$evidence/failures/missing-geo-data.json"
 printf 'dns-projection assertions=9\n'

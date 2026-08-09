@@ -21,7 +21,7 @@ function index()
 
 	local api = {"admin", "services", "honk-legacy", "api"}
 	entry(api, firstchild()).leaf = false
-	for _, name in ipairs({"dashboard", "dashboard_prepare", "state", "validate", "save", "apply", "service", "logs", "traffic", "model", "runtime_nodes", "model_parse", "model_preview", "model_apply", "node_parse", "node_test", "network_discovery", "quick_state", "quick_preview", "quick_apply", "geo_repair", "transaction_status"}) do
+	for _, name in ipairs({"dashboard", "dashboard_prepare", "state", "validate", "save", "apply", "service", "logs", "traffic", "model", "runtime_nodes", "model_parse", "model_preview", "model_apply", "node_parse", "node_test", "network_discovery", "quick_state", "quick_preview", "quick_apply", "transaction_status"}) do
 		entry({"admin", "services", "honk-legacy", "api", name}, call("api_" .. name)).leaf = true
 	end
 end
@@ -204,14 +204,6 @@ function api_quick_apply()
 	local dispatcher = require "luci.dispatcher"
 	data.sessionId = data.sessionId or (dispatcher.context and dispatcher.context.authsession)
 	local result, code = require("luci.model.honk_legacy_api").quick_apply(data)
-	respond(result, code)
-end
-
-function api_geo_repair()
-	if not mutation_guard() then return end
-	local data, err, status = body()
-	if not data then respond({ ok = false, error = { code = "INVALID_REQUEST", message = err } }, status); return end
-	local result, code = require("luci.model.honk_legacy_api").geo_repair(data.confirm == true)
 	respond(result, code)
 end
 

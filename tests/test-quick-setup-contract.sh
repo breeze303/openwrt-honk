@@ -15,10 +15,10 @@ luac -p "$repo_root/luci-app-honk-legacy/luasrc/controller/honk_legacy.lua"
 pass "Lua model/controller syntax"
 
 api="$repo_root/luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua"
-for symbol in network_discovery quick_state quick_preview quick_apply geo_repair transaction_status; do
+for symbol in network_discovery quick_state quick_preview quick_apply transaction_status; do
 	grep -F "function M.$symbol" "$api" >/dev/null || fail "missing API: $symbol"
 done
-for code in GEO_V2FLY_UNSUPPORTED GEO_TAMPERED GEO_LABEL_MISSING INTERFACE_AMBIGUOUS PROXY_GROUP_REQUIRED SUBSCRIPTION_DUPLICATE SUBSCRIPTION_LIMIT ADVANCED_REPLACEMENT_REQUIRED REVISION_CONFLICT; do
+for code in GEO_DATA_MISSING INTERFACE_AMBIGUOUS PROXY_GROUP_REQUIRED SUBSCRIPTION_DUPLICATE SUBSCRIPTION_LIMIT ADVANCED_REPLACEMENT_REQUIRED REVISION_CONFLICT; do
 	grep -F "$code" "$api" >/dev/null || fail "missing error contract: $code"
 done
 grep -F '# honk-quick-setup: v1' "$api" >/dev/null

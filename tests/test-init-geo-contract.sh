@@ -14,18 +14,11 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 sh -n "$init"
 grep -F 'honk-tool validate --config "$CONFIG" --json' "$init" >/dev/null || fail "validate preflight missing"
 grep -F 'config-validation.json' "$init" >/dev/null || fail "validation receipt missing"
-grep -F '.geo.geosite[]?' "$init" >/dev/null || fail "geosite references are not enumerated"
-grep -F '.geo.geoip[]?' "$init" >/dev/null || fail "geoip references are not enumerated"
-grep -F 'DAE_LOCATION_ASSET="$ASSET_DIR"' "$init" >/dev/null || fail "asset directory is not pinned"
-grep -F 'rm -f "$LIVE_RECEIPT"' "$init" >/dev/null || fail "stale live receipt is not cleared"
-grep -F 'CONFIG_SHA_BEFORE' "$init" >/dev/null || fail "config TOCTOU check missing"
-grep -F 'HONK_QUICK_RECOVERY_FROM_INIT=1' "$init" >/dev/null || fail "recovery recursion guard missing"
-grep -F 'DAE_ALLOW_CUSTOM_GEO=1' "$init" >/dev/null || fail "custom Geo policy is not passed to honk-tool"
-grep -F 'write_live_receipt' "$init" >/dev/null || fail "live Geo receipt writer missing"
-grep -F 'ubus call service list' "$init" >/dev/null || fail "live receipt does not use the procd instance"
-grep -F 'previous_pids' "$init" >/dev/null || fail "live receipt does not reject the previous process"
-grep -F -- '--only geoip' "$init" >/dev/null || fail "single-asset Geo preflight is missing"
-grep -F "option allow_custom_geo '0'" "$repo_root/honk/files/honk.config" >/dev/null || fail "custom Geo default is not locked"
+grep -F 'GEO_DIR=/usr/share/v2ray' "$init" >/dev/null || fail "OpenWrt Geo directory is not configured"
+grep -F 'geosite.dat' "$init" >/dev/null || fail "GeoSite presence check missing"
+grep -F 'geoip.dat' "$init" >/dev/null || fail "GeoIP presence check missing"
+grep -F '"DAE_LOCATION_ASSET=$GEO_DIR"' "$init" >/dev/null || fail "runtime Geo directory is not exported"
+grep -F '+v2ray-geoip +v2ray-geosite' "$repo_root/honk/Makefile" >/dev/null || fail "official Geo package dependencies missing"
 grep -F "option dnsmasq_forwarding '1'" "$repo_root/honk/files/honk.config" >/dev/null || fail "dnsmasq forwarding is not enabled by default"
 grep -F 'dnsmasq-integration' "$init" >/dev/null || fail "dnsmasq lifecycle helper is missing"
 grep -F 'HONK_DNSMASQ_FORWARDING' "$init" >/dev/null || fail "dnsmasq forwarding flag is not passed to launcher"
@@ -34,8 +27,39 @@ grep -F 'ensure_dns_listener_binding' "$init" >/dev/null || fail "DNS listener b
 grep -F 'migrate_managed_dns_routing' "$init" >/dev/null || fail "managed DNS routing migration is missing"
 grep -F 'pname(NetworkManager, systemd-resolved, dnsmasq) -> direct(must)' "$init" >/dev/null || fail "fixed resolver process rule is missing"
 grep -F 'dip(geoip: private) -> direct' "$init" >/dev/null || fail "fixed private network rule is missing"
+if grep -Eq 'geo\.lock|DAE_ALLOW_CUSTOM_GEO|write_live_receipt|/usr/(lib|share)/honk' "$init"; then fail "init still contains Honk-owned Geo handling"; fi
 if grep -F 'RESOLV_HONK' "$init" >/dev/null; then fail "resolver bind-mount integration is still configured"; fi
 if grep -F 'mount --bind' "$init" >/dev/null; then fail "honk must not replace resolv.conf"; fi
+
+geo_fixture_dir="$evidence/v2ray"
+mkdir -p "$geo_fixture_dir"
+: >"$geo_fixture_dir/geosite.dat"
+: >"$geo_fixture_dir/geoip.dat"
+if (
+	. "$init"
+	GEO_DIR="$geo_fixture_dir"
+	VALIDATION_ERROR='{"geo":{"geosite":["cn"],"geoip":["private"]}}'
+	validate_geo_assets
+); then
+	fail "empty Geo files passed the preflight"
+fi
+printf 'geosite\n' >"$geo_fixture_dir/geosite.dat"
+printf 'geoip\n' >"$geo_fixture_dir/geoip.dat"
+(
+	. "$init"
+	GEO_DIR="$geo_fixture_dir"
+	VALIDATION_ERROR='{"geo":{"geosite":["cn"],"geoip":["private"]}}'
+	validate_geo_assets
+) || fail "OpenWrt Geo files did not pass the preflight"
+rm -f "$geo_fixture_dir/geoip.dat"
+if (
+	. "$init"
+	GEO_DIR="$geo_fixture_dir"
+	VALIDATION_ERROR='{"geo":{"geosite":["cn"],"geoip":["private"]}}'
+	validate_geo_assets
+); then
+	fail "missing GeoIP passed the preflight"
+fi
 
 dns_fixture_dir="$evidence/dns-bind"
 mkdir -p "$dns_fixture_dir/run"
@@ -58,9 +82,8 @@ grep -F "bind: 'tcp+udp://127.0.0.1:1053'" "$legacy_config" >/dev/null || fail "
 )
 grep -F "bind: 'tcp+udp://127.0.0.1:5353'" "$custom_config" >/dev/null || fail "custom DNS listener binding was replaced"
 if grep -Fq "bind: 'tcp+udp://127.0.0.1:1053'" "$custom_config"; then fail "custom DNS listener binding was duplicated"; fi
-pass "init preflight, reference enumeration and TOCTOU guards"
+pass "init uses OpenWrt Geo data without lock state"
 
-printf '%s\n' '{"schemaVersion":"honk.init-geo.v1","ok":true,"checks":["validate","actual-geo-refs","asset-path","config-sha-before-after","stale-live-cleanup"],"assertions":7}' >"$evidence/init-contract.json"
-printf '%s\n' '{"fixture":"invalid-config","ok":false,"receipt":"config-validation.json","serviceReplaced":false}' >"$evidence/failures/invalid-config.json"
-printf '%s\n' '{"fixture":"geo-label-missing","ok":false,"receipt":"geo-assets.json","serviceReplaced":false}' >"$evidence/failures/geo-label-missing.json"
+printf '%s\n' '{"schemaVersion":"honk.init-geo.v2","ok":true,"geoDirectory":"/usr/share/v2ray","packages":["v2ray-geoip","v2ray-geosite"],"assertions":8}' >"$evidence/init-contract.json"
+printf '%s\n' '{"fixture":"geo-file-missing","ok":false,"serviceReplaced":false}' >"$evidence/failures/geo-file-missing.json"
 printf 'init-geo assertions=%s\n' "$assertions"

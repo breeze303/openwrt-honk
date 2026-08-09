@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AlertTriangle, Check, CircleHelp, Eye, FileCheck2, RefreshCw, RotateCcw, ShieldCheck, Wrench } from '@lucide/vue'
+import { AlertTriangle, Check, CircleHelp, Eye, FileCheck2, RefreshCw, ShieldCheck } from '@lucide/vue'
 import { api, type QuickPreview, type QuickState } from '../api'
 import { quickCopy as copy } from '../i18n'
 
@@ -16,9 +16,7 @@ const selectedSubscriptions = ref<string[]>([])
 const replaceAdvanced = ref(false)
 const preview = ref<QuickPreview | null>(null)
 
-const geoLocked = computed(() => state.value?.geo?.diskStatus === 'LOYALSOLDIER_LOCKED')
-const activeLocked = computed(() => state.value?.geo?.activeStatus === 'LOYALSOLDIER_LOCKED')
-const geoBlocked = computed(() => !geoLocked.value)
+const geoBlocked = computed(() => state.value?.geo?.ok !== true)
 const selectedPreset = computed(() => state.value?.presets.find(item => item.id === preset.value))
 const interfaces = computed(() => state.value?.discovery.interfaces.filter(item => item.safe && item.l3Device) || [])
 const canPreview = computed(() => Boolean(lanDevice.value && wanDevice.value && (preset.value === 'direct' || selectedSubscriptions.value.length) && (!selectedPreset.value?.requiresGeo || !geoBlocked.value)))
@@ -84,33 +82,6 @@ async function applyPreview() {
   }
 }
 
-async function repairGeo() {
-  busy.value = true
-  error.value = ''
-  try {
-    const result = await api.geoRepair()
-    notice.value = result.needsRestart ? copy.repairedRestart : copy.repaired
-    await load()
-  } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : String(reason)
-  } finally {
-    busy.value = false
-  }
-}
-
-async function restart() {
-  busy.value = true
-  try {
-    await api.service('restart')
-    notice.value = copy.restarted
-    await load()
-  } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : String(reason)
-  } finally {
-    busy.value = false
-  }
-}
-
 onMounted(() => { void load() })
 </script>
 
@@ -124,7 +95,6 @@ onMounted(() => { void load() })
       </div>
       <div class="view-tools">
         <button class="icon-button" :title="copy.refresh" :aria-label="copy.refresh" :disabled="loading || busy" @click="load"><RefreshCw :size="17" /></button>
-        <button v-if="state?.geo?.activeStatus === 'STALE' && geoLocked" class="secondary-button" :disabled="busy" @click="restart"><RotateCcw :size="16" />{{ copy.restartActivate }}</button>
       </div>
     </header>
 
@@ -135,23 +105,20 @@ onMounted(() => { void load() })
       <header class="panel-heading"><div><p class="kicker">Assets</p><h2>{{ copy.assets }}</h2></div><ShieldCheck :size="20" /></header>
       <div class="quick-status-grid">
         <div><span>{{ copy.diskProvider }}</span><strong :class="{ 'quick-bad': geoBlocked }">{{ state?.geo?.diskStatus || 'MISSING' }}</strong></div>
-        <div><span>{{ copy.activeProvider }}</span><strong :class="{ 'quick-bad': !activeLocked }">{{ state?.geo?.activeStatus || 'STALE' }}</strong></div>
-        <div><span>{{ copy.path }}</span><code>{{ state?.geo?.configuredPath || '/usr/share/honk' }}</code></div>
-        <div><span>{{ copy.geositeHash }}</span><code>{{ state?.geo?.hashes?.geosite || '-' }}</code></div>
+        <div><span>{{ copy.geoPackages }}</span><strong>v2ray-geosite · v2ray-geoip</strong></div>
+        <div><span>{{ copy.path }}</span><code>{{ state?.geo?.configuredPath || '/usr/share/v2ray' }}</code></div>
       </div>
       <div v-if="geoBlocked" class="quick-block-row">
         <AlertTriangle :size="17" />
         <span>{{ copy.geoBlocked }}</span>
-        <button class="secondary-button" :disabled="busy" @click="repairGeo"><Wrench :size="16" />{{ copy.repair }}</button>
       </div>
-      <div v-else-if="!activeLocked" class="quick-block-row"><CircleHelp :size="17" /><span>{{ copy.stale }}</span><button class="secondary-button" :disabled="busy" @click="restart"><RotateCcw :size="16" />{{ copy.restart }}</button></div>
     </section>
 
     <section class="quick-setup-grid">
       <section class="surface-panel quick-form-panel">
         <header class="panel-heading"><div><p class="kicker">Workflow</p><h2>{{ copy.workflow }}</h2></div><FileCheck2 :size="20" /></header>
         <div class="quick-form-body">
-          <label><span>{{ copy.preset }}</span><select v-model="preset"><option value="direct">{{ copy.direct }}</option><option value="gfwlist" :disabled="geoBlocked">{{ copy.gfwlist }}</option><option value="china-direct" :disabled="geoBlocked">{{ copy.chinaDirect }}</option><option value="global">{{ copy.global }}</option></select></label>
+          <label><span>{{ copy.preset }}</span><select v-model="preset"><option value="direct" :disabled="geoBlocked">{{ copy.direct }}</option><option value="gfwlist" :disabled="geoBlocked">{{ copy.gfwlist }}</option><option value="china-direct" :disabled="geoBlocked">{{ copy.chinaDirect }}</option><option value="global" :disabled="geoBlocked">{{ copy.global }}</option></select></label>
           <label><span>{{ copy.lan }}</span><select v-model="lanDevice"><option value="" disabled>{{ copy.chooseDevice }}</option><option v-for="item in interfaces" :key="`lan-${item.l3Device}`" :value="item.l3Device">{{ item.l3Device }} · {{ item.logicalName }}</option></select></label>
           <label><span>{{ copy.wan }}</span><select v-model="wanDevice"><option value="" disabled>{{ copy.chooseDevice }}</option><option v-for="item in interfaces" :key="`wan-${item.l3Device}`" :value="item.l3Device">{{ item.l3Device }} · {{ item.logicalName }}</option></select></label>
           <fieldset v-if="state?.subscriptions.length && preset !== 'direct'" class="quick-subscriptions"><legend>{{ copy.subscriptions }}</legend><label v-for="item in state.subscriptions" :key="item.name" class="quick-check"><input type="checkbox" :checked="selectedSubscriptions.includes(item.name)" @change="toggleSubscription(item.name)" /><span>{{ item.name }}</span></label></fieldset>

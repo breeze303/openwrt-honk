@@ -62,7 +62,7 @@ if [ "$synthetic" != true ]; then
   "network": {"lan": null, "wan": null, "services": null},
   "dns": {"aliyun": "223.5.5.5:53", "google": "8.8.8.8:53", "status": "not-installed"},
   "publicEgress": {"guard": "not-proven", "managementInterfaceExcluded": true},
-  "membership": {"status": "not-collected", "source": "locked-dat-required"},
+  "membership": {"status": "not-collected", "source": "openwrt-v2ray-packages-required"},
   "usesTestDomains": false
 }
 JSON
@@ -81,7 +81,7 @@ cat >"$evidence/fixture-manifest.json" <<'JSON'
   "schemaVersion": "honk.target-fixture.v1",
   "network": {"lan": "hkFIXTURE-lan", "wan": "hkFIXTURE-wan", "services": "hkFIXTURE-services", "publicEgress": "DROP"},
   "dns": {"aliyun": "223.5.5.5:53", "google": "8.8.8.8:53"},
-  "membership": {"gfwMember": "locked-dat-required", "nonGfwMember": "locked-dat-required", "cnMember": "locked-dat-required", "nonCnMember": "locked-dat-required", "cnIpMember": "locked-geoip-required", "nonCnIpMember": "locked-geoip-required"},
+  "membership": {"gfwMember": "v2ray-geosite-required", "nonGfwMember": "v2ray-geosite-required", "cnMember": "v2ray-geosite-required", "nonCnMember": "v2ray-geosite-required", "cnIpMember": "v2ray-geoip-required", "nonCnIpMember": "v2ray-geoip-required"},
   "usesTestDomains": false
 }
 JSON

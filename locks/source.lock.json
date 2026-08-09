@@ -17,7 +17,7 @@
     "patchDigests": [
       {
         "path": "honk/patches/100-openwrt-main-contracts.patch",
-        "sha256": "4210bba3452a2688d767b0a24b3df19c52ea5013cb4587e9f4d50fd5140bc44c"
+        "sha256": "b0fe4a910754d63afc95e8b8ff7fc73e06cc42f54311d4dc6cece4e41826bcab"
       },
       {
         "path": "honk/patches/110-openwrt-subscription-errors.patch",

@@ -52,7 +52,6 @@ export const api = {
   networkDiscovery: () => request<NetworkDiscovery>('network_discovery'),
   quickPreview: (input: QuickInput) => request<QuickPreview>('quick_preview', input),
   quickApply: (previewNonce: string, expectedRevision: string) => request<QuickApply>('quick_apply', { previewNonce, expectedRevision }),
-  geoRepair: () => request<GeoRepair>('geo_repair', { confirm: true }),
 }
 
 export type RuntimeBootstrap = {
@@ -228,12 +227,8 @@ export type NetworkDiscovery = { ok: boolean; interfaces: NetworkInterface[]; re
 export type GeoStatus = {
   ok?: boolean
   diskStatus?: string
-  activeStatus?: string
   configuredPath?: string
-  resolvedPaths?: { geosite?: string; geoip?: string }
-  hashes?: { geosite?: string; geoip?: string }
-  providers?: { geosite?: string; geoip?: string }
-  labels?: Array<{ label: string; present: boolean }>
+  packages?: { geosite?: string; geoip?: string }
 }
 export type QuickState = {
   ok: boolean
@@ -271,7 +266,6 @@ export type QuickPreview = {
   blockedReasons: string[]
 }
 export type QuickApply = { ok: boolean; transaction?: Record<string, unknown>; result?: SaveResponse; error?: { code?: string; message?: string } }
-export type GeoRepair = { ok: boolean; needsRestart?: boolean; diskStatus?: string; activeStatus?: string }
 export type SubscriptionStatus = {
   name: string
   enabled: boolean
