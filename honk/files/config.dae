@@ -1,4 +1,5 @@
 global {
+	data_dir: '/var/share/honk'
 	wan_interface: auto
 	lan_interface: auto
 	log_level: info
@@ -9,6 +10,7 @@ global {
 	tcp_check_url: 'http://connectivitycheck.platform.hicloud.com/generate_204'
 	tcp_check_http_method: HEAD
 	udp_check_dns: 'dns.google.com:53,8.8.8.8'
+	bootstrap_resolver: 'udp://223.5.5.5:53'
 	fallback_resolver: '8.8.8.8:53'
 	tls_implementation: "tls"
 	check_interval: 30s

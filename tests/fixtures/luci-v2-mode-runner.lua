@@ -64,6 +64,7 @@ for _, name in ipairs({ "china-direct", "gfwlist", "china-proxy", "global" }) do
 	assert(routing_rule_count(compiled.candidate, "dip(geoip: private) -> direct") == 1, "private rule duplicated")
 	assert(compiled.candidate:find("direct-dns", 1, true), "new direct DNS name missing")
 	assert(compiled.candidate:find("proxy-dns", 1, true), "new proxy DNS name missing")
+	assert(compiled.candidate:find("bootstrap_resolver: 'udp://223.5.5.5:53'", 1, true), "bootstrap resolver missing")
 	assert(compiled.candidate:find("bind: 'tcp+udp://127.0.0.1:1053'", 1, true), "dnsmasq listener bind missing")
 	local projected_dns = require "luci.model.dns".current(compiled.candidate)
 	assert(projected_dns.bind == "tcp+udp://127.0.0.1:1053", "generated DNS bind could not be read back")

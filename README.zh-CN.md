@@ -227,6 +227,13 @@ group {
 }
 ~~~
 
+## 运行数据
+
+OpenWrt 软件包将 `global.data_dir` 设为 `/var/share/honk`，并使用
+`udp://223.5.5.5:53` 作为代理服务器域名的直连 bootstrap 解析器。订阅响应缓存
+保存在 `/var/share/honk/.sub`，目录和文件仅允许 root 访问。升级时服务启动
+前会把 r21 之前的 `/etc/honk/.sub` 缓存迁移到新目录；全新安装不会再创建旧目录。
+
 规则模式遵循 routing 表；全局模式将非直连流量发送到当前主节点；直连模式将非 must 流量直接发送。direct(must) 和 block 在模式切换时保持最终决定。
 
 ## DNS

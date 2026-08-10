@@ -4,6 +4,8 @@ local config = require "luci.model.config"
 
 local M = {}
 
+M.DEFAULT_BOOTSTRAP_RESOLVER = "udp://223.5.5.5:53"
+
 M.DIAL_MODES = {
 	ip = true,
 	domain = true,
@@ -167,6 +169,7 @@ function M.update_global(content, values)
 	if not global then
 		local lines = {
 			"global {",
+			"\tbootstrap_resolver: " .. config.dae_quote(M.DEFAULT_BOOTSTRAP_RESOLVER),
 			"\twan_interface: " .. config.dae_quote(values.wan),
 			"\tlan_interface: " .. config.dae_quote(values.lan),
 			"\tdial_mode: " .. config.dae_quote(values.dialMode),
@@ -176,6 +179,7 @@ function M.update_global(content, values)
 		return config.replace_section(content, "global", table.concat(lines, "\n"))
 	end
 	local body = config.section_body(content, global)
+	body = config.ensure_key(body, "bootstrap_resolver", M.DEFAULT_BOOTSTRAP_RESOLVER)
 	body = replace_key(body, "lan_interface", values.lan)
 	body = replace_key(body, "wan_interface", values.wan)
 	body = replace_key(body, "dial_mode", values.dialMode)

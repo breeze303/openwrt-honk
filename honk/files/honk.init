@@ -14,6 +14,9 @@ LOG_DIR=/tmp/honk
 LOG_FILE=$LOG_DIR/honk.log
 RUN_DIR=/run/honk
 GEO_DIR=/usr/share/v2ray
+DEFAULT_DATA_DIR=/var/share/honk
+LEGACY_SUBSCRIPTION_DIR=/etc/honk/.sub
+DEFAULT_BOOTSTRAP_RESOLVER=udp://223.5.5.5:53
 DNSMASQ_HELPER=/usr/libexec/honk/dnsmasq-integration
 
 validate_config() {
@@ -39,6 +42,121 @@ ensure_config() {
 	cp "$DEFAULT_CONFIG" "$CONFIG" || return 1
 	chmod 600 "$CONFIG" || return 1
 	logger -t honk "initialized missing configuration from $DEFAULT_CONFIG"
+}
+
+configured_data_dir() {
+	awk '
+		/^[[:space:]]*global[[:space:]]*\{/ {
+			inside = 1
+			next
+		}
+		inside && /^[[:space:]]*data_dir[[:space:]]*:/ {
+			value = $0
+			sub(/^[^:]*:[[:space:]]*/, "", value)
+			sub(/[[:space:]]*#.*/, "", value)
+			sub(/[[:space:]]*$/, "", value)
+			if (value ~ /^\047.*\047$/ || value ~ /^".*"$/) {
+				value = substr(value, 2, length(value) - 2)
+			}
+			print value
+			exit
+		}
+		inside && /^[[:space:]]*\}/ { exit }
+	' "$CONFIG"
+}
+
+prepare_subscription_store() {
+	local data_dir subscription_dir entry destination name migrated
+	data_dir="$(configured_data_dir)"
+	case "$data_dir" in
+		/*) ;;
+		*) data_dir="$DEFAULT_DATA_DIR" ;;
+	esac
+	data_dir="${data_dir%/}"
+	[ -n "$data_dir" ] || data_dir="$DEFAULT_DATA_DIR"
+	subscription_dir="$data_dir/.sub"
+
+	if [ -L "$data_dir" ] || { [ -e "$data_dir" ] && [ ! -d "$data_dir" ]; }; then
+		logger -t honk "runtime data path is not a directory: $data_dir"
+		return 1
+	fi
+	if [ -L "$subscription_dir" ] || { [ -e "$subscription_dir" ] && [ ! -d "$subscription_dir" ]; }; then
+		logger -t honk "subscription store is not a directory: $subscription_dir"
+		return 1
+	fi
+	mkdir -p "$subscription_dir" || return 1
+	chmod 700 "$data_dir" "$subscription_dir" || return 1
+
+	[ "$subscription_dir" = "$LEGACY_SUBSCRIPTION_DIR" ] && return 0
+	[ -e "$LEGACY_SUBSCRIPTION_DIR" ] || return 0
+	if [ -L "$LEGACY_SUBSCRIPTION_DIR" ] || [ ! -d "$LEGACY_SUBSCRIPTION_DIR" ]; then
+		logger -t honk "legacy subscription store is not a directory: $LEGACY_SUBSCRIPTION_DIR"
+		return 1
+	fi
+
+	migrated=0
+	for entry in "$LEGACY_SUBSCRIPTION_DIR"/*.sub; do
+		[ -e "$entry" ] || continue
+		if [ -L "$entry" ] || [ ! -f "$entry" ]; then
+			logger -t honk "skipping unsafe legacy subscription entry: ${entry##*/}"
+			continue
+		fi
+		name="${entry##*/}"
+		destination="$subscription_dir/$name"
+		if [ ! -e "$destination" ] && [ ! -L "$destination" ]; then
+			mv "$entry" "$destination" || return 1
+			chmod 600 "$destination" || return 1
+			migrated=$((migrated + 1))
+		elif [ ! -L "$destination" ] && [ -f "$destination" ] && cmp -s "$entry" "$destination"; then
+			rm -f "$entry" || return 1
+		else
+			logger -t honk "subscription cache migration conflict: $name"
+		fi
+	done
+	rmdir "$LEGACY_SUBSCRIPTION_DIR" 2>/dev/null || true
+	[ "$migrated" -eq 0 ] || logger -t honk "migrated $migrated subscription cache file(s) to $subscription_dir"
+}
+
+ensure_bootstrap_resolver() {
+	[ -r "$CONFIG" ] || return 0
+	awk '
+		/^[[:space:]]*global[[:space:]]*\{/ {
+			inside = 1
+			next
+		}
+		inside && /^[[:space:]]*bootstrap_resolver[[:space:]]*:/ { found = 1 }
+		inside && /^[[:space:]]*\}/ { inside = 0 }
+		END { exit(found ? 0 : 1) }
+	' "$CONFIG" && return 0
+
+	local temp_file
+	temp_file="$RUN_DIR/config-bootstrap.tmp.$$"
+	awk -v resolver="$DEFAULT_BOOTSTRAP_RESOLVER" '
+		/^[[:space:]]*global[[:space:]]*\{/ {
+			inside = 1
+			print
+			next
+		}
+		inside && /^[[:space:]]*fallback_resolver[[:space:]]*:/ && !inserted {
+			print "\tbootstrap_resolver: \047" resolver "\047"
+			inserted = 1
+		}
+		inside && /^[[:space:]]*\}/ && !inserted {
+			print "\tbootstrap_resolver: \047" resolver "\047"
+			inserted = 1
+		}
+		{ print }
+	' "$CONFIG" >"$temp_file" || {
+		rm -f "$temp_file"
+		return 1
+	}
+	if cmp -s "$CONFIG" "$temp_file"; then
+		rm -f "$temp_file"
+		return 0
+	fi
+	chmod 600 "$temp_file"
+	mv "$temp_file" "$CONFIG" || return 1
+	logger -t honk "added bootstrap resolver $DEFAULT_BOOTSTRAP_RESOLVER"
 }
 
 dns_listener_binding_present() {
@@ -205,6 +323,14 @@ start_service() {
 		return 1
 	fi
 	ensure_config || return 1
+	ensure_bootstrap_resolver || {
+		logger -t honk "bootstrap resolver migration failed"
+		return 1
+	}
+	prepare_subscription_store || {
+		logger -t honk "subscription store preparation failed"
+		return 1
+	}
 	if [ "$dnsmasq_forwarding" -eq 1 ]; then
 		ensure_dns_listener_binding || {
 			logger -t honk "DNS listener binding migration failed"

@@ -228,6 +228,16 @@ group {
 }
 ~~~
 
+## Runtime data
+
+The OpenWrt package sets `global.data_dir` to `/var/share/honk` and uses
+`udp://223.5.5.5:53` as the direct bootstrap resolver for proxy-server
+hostnames. Honk stores
+subscription response files in `/var/share/honk/.sub` with root-only
+permissions. Upgrades migrate cache files from the pre-r21 `/etc/honk/.sub`
+location before starting the service; the legacy directory is not created on
+fresh installs.
+
 Rule mode follows the routing table. Global sends non-direct traffic to the selected primary node, while Direct sends non-must traffic directly. direct(must) and block decisions remain final across mode changes.
 
 ## DNS

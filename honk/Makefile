@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
 PKG_VERSION:=0.0.1_git
-PKG_RELEASE:=20
+PKG_RELEASE:=22
 PKG_LICENSE:=GPL-3.0-only
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=Honk OpenWrt feed
@@ -40,7 +40,6 @@ define Package/honk/conffiles
 /etc/honk/config.dae
 /etc/honk/config.d/
 /etc/honk/subscriptions/
-/etc/honk/.sub/
 endef
 
 RUST_TARGET:=$(RUSTC_TARGET_ARCH)
@@ -75,7 +74,8 @@ define Build/Compile
 endef
 
 define Package/honk/install
-	$(INSTALL_DIR) $(1)/usr/bin $(1)/usr/libexec/honk $(1)/etc/init.d $(1)/etc/config $(1)/etc/honk/config.d $(1)/etc/honk/subscriptions $(1)/etc/honk/.sub
+	$(INSTALL_DIR) $(1)/usr/bin $(1)/usr/libexec/honk $(1)/etc/init.d $(1)/etc/config $(1)/etc/honk/config.d $(1)/etc/honk/subscriptions $(1)/var/share/honk
+	chmod 0700 $(1)/var/share/honk
 	$(INSTALL_BIN) $(HONK_CORE_BINARY) $(1)/usr/bin/honk-core
 	$(INSTALL_BIN) $(HONK_TOOL_BINARY) $(1)/usr/bin/honk-tool
 	$(INSTALL_BIN) $(CURDIR)/files/honk.init $(1)/etc/init.d/honk

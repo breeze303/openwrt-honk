@@ -141,6 +141,15 @@ function M.key_values(body)
 	return result
 end
 
+function M.ensure_key(body, key, value)
+	local values = M.key_values(body)
+	if values[key] ~= nil then return body end
+	local trailing = (body or ""):match("(%s*)$") or ""
+	local head = (body or ""):sub(1, #(body or "") - #trailing)
+	local separator = head ~= "" and "\n" or ""
+	return head .. separator .. "\t" .. key .. ": " .. M.dae_quote(value) .. trailing
+end
+
 function M.named_entries(body)
 	local result = {}
 	for line in tostring(body or ""):gmatch("[^\n]+") do

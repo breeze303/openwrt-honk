@@ -14,8 +14,6 @@ readonly sdk_cache_dir=${SDK_CACHE_DIR:-}
 readonly sccache_cache_size=${SCCACHE_CACHE_SIZE:-768M}
 
 cache_enabled=false
-rust_host_restored=false
-target_staging_dir=''
 
 log() {
 	printf '%s\n' "[honk-sdk] $*"
@@ -34,7 +32,7 @@ configure_cache() {
 		/*) ;;
 		*) printf '%s\n' 'SDK_CACHE_DIR must be an absolute path' >&2; exit 64 ;;
 	esac
-	mkdir -p "$sdk_cache_dir"/{cargo,rustup,dl,rust-feed,tool-downloads,sccache,rust-host}
+	mkdir -p "$sdk_cache_dir"/{cargo,rustup,dl,rust-feed,tool-downloads,sccache}
 	cache_link "$CARGO_HOME" "$sdk_cache_dir/cargo"
 	cache_link "$RUSTUP_HOME" "$sdk_cache_dir/rustup"
 	cache_link "$PWD/dl" "$sdk_cache_dir/dl"
@@ -62,56 +60,6 @@ prepare_rust_feed() {
 	rm -rf "$rust_feed_dir"
 	git clone --quiet https://github.com/sbwml/packages_lang_rust.git "$rust_feed_dir"
 	git -C "$rust_feed_dir" checkout --quiet --detach "$rust_feed_commit"
-}
-
-find_target_staging_dir() {
-	local targets=()
-	mapfile -t targets < <(find "$PWD/staging_dir" -mindepth 1 -maxdepth 1 -type d -name 'target-*' -printf '%p\n' | sort)
-	if [ "${#targets[@]}" -ne 1 ]; then
-		log "skipping Rust host cache: expected one target staging directory, found ${#targets[@]}"
-		return 0
-	fi
-	target_staging_dir=${targets[0]}
-}
-
-restore_rust_host() {
-	"$cache_enabled" || return 0
-	find_target_staging_dir
-	[ -n "$target_staging_dir" ] || return 0
-	local target_name cache_host cache_stamp
-	target_name=$(basename "$target_staging_dir")
-	cache_host="$sdk_cache_dir/rust-host/$target_name"
-	cache_stamp="$sdk_cache_dir/rust-host/$target_name.rust-installed"
-	if [ -x "$cache_host/bin/rustc" ] && [ -f "$cache_host/lib/rustlib/manifest-rustc" ] && [ -f "$cache_stamp" ]; then
-		rm -rf "$target_staging_dir/host"
-		ln -s "$cache_host" "$target_staging_dir/host"
-		mkdir -p "$PWD/staging_dir/hostpkg/stamp"
-		cp "$cache_stamp" "$PWD/staging_dir/hostpkg/stamp/.rust_installed"
-		rust_host_restored=true
-		log "Rust host toolchain restored for $target_name"
-	else
-		log "Rust host toolchain cache miss for $target_name"
-	fi
-}
-
-persist_rust_host() {
-	"$cache_enabled" || return 0
-	"$rust_host_restored" && return 0
-	[ -n "$target_staging_dir" ] || return 0
-	local target_name cache_host cache_stamp temporary
-	target_name=$(basename "$target_staging_dir")
-	cache_host="$sdk_cache_dir/rust-host/$target_name"
-	cache_stamp="$sdk_cache_dir/rust-host/$target_name.rust-installed"
-	if [ ! -x "$target_staging_dir/host/bin/rustc" ] || [ ! -f "$target_staging_dir/host/lib/rustlib/manifest-rustc" ] || [ ! -f "$PWD/staging_dir/hostpkg/stamp/.rust_installed" ]; then
-		log "Rust host toolchain was not complete; not saving cache"
-		return 0
-	fi
-	temporary=$(mktemp -d "$sdk_cache_dir/rust-host/.${target_name}.tmp.XXXXXX")
-	cp -a "$target_staging_dir/host/." "$temporary/"
-	rm -rf "$cache_host"
-	mv "$temporary" "$cache_host"
-	cp "$PWD/staging_dir/hostpkg/stamp/.rust_installed" "$cache_stamp"
-	log "Rust host toolchain saved for $target_name"
 }
 
 ensure_sccache() {
@@ -206,14 +154,12 @@ CONFIG_RUST_SCCACHE_DIR="$SCCACHE_DIR"
 EOF
 fi
 make defconfig
-restore_rust_host
 make "package/honk/download" V=s
 make -j"$(nproc)" CONFIG_AUTOREMOVE=y BPF_RUST_TOOLCHAIN="$bpf_toolchain" \
 	"package/honk/compile" \
 	"package/luci-app-honk/compile" \
 	"package/luci-app-honk-legacy/compile" V=s
 
-persist_rust_host
 if "$cache_enabled"; then
 	sccache --show-stats || true
 fi

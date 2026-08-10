@@ -5,6 +5,8 @@ local subscription = require "luci.model.subscription"
 
 local M = {}
 
+M.DEFAULT_BOOTSTRAP_RESOLVER = "udp://223.5.5.5:53"
+
 M.MODES = {
 	["china-direct"] = { label = "国内直连", geoSite = { "cn" }, geoIp = { "private", "cn" } },
 	gfwlist = { label = "GFW", geoSite = { "gfw" }, geoIp = { "private" } },
@@ -117,10 +119,12 @@ local function render_global(content)
 	local section = config.section(content, "global")
 	if section then
 		local body = config.section_body(content, section)
+		body = config.ensure_key(body, "bootstrap_resolver", M.DEFAULT_BOOTSTRAP_RESOLVER)
 		if config.trim(body) ~= "" then return "global {" .. body .. "}" end
 	end
 	return table.concat({
 		"global {",
+		"\tbootstrap_resolver: " .. config.dae_quote(M.DEFAULT_BOOTSTRAP_RESOLVER),
 		"\twan_interface: auto",
 		"\tlan_interface: auto",
 		"\tlog_level: info",

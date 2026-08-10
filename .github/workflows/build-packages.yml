@@ -135,7 +135,6 @@ jobs:
           path: |
             .ci-cache/openwrt/dl
             .ci-cache/openwrt/sccache
-            .ci-cache/openwrt/rust-host
           key: honk-sdk-toolchain-v1-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.sdk }}-${{ steps.sdk-cache-key.outputs.cache_identity }}
 
       - name: Build packages in OpenWrt SDK
@@ -150,7 +149,7 @@ jobs:
           SCCACHE_SHA256: 67c4a96dd237c1f518f6b36083f270f9976d516f1e57fce891755ea782e50006
         run: |
           set -euo pipefail
-          mkdir -p .build-output .ci-cache/openwrt
+          mkdir -p .build-output .ci-cache/openwrt .cache/dl
           sudo chown -R 1000:1000 .build-output .ci-cache/openwrt .cache/dl
           docker run --rm \
             --user root \
@@ -218,7 +217,6 @@ jobs:
           path: |
             .ci-cache/openwrt/dl
             .ci-cache/openwrt/sccache
-            .ci-cache/openwrt/rust-host
           key: honk-sdk-toolchain-v1-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.sdk }}-${{ steps.sdk-cache-key.outputs.cache_identity }}
 
       - name: Save shared Rust and BPF cache
