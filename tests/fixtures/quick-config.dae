@@ -5,7 +5,7 @@ global {
 	wan_interface: 'eth0.2'
 }
 node {
-	alpha-static: 'direct://'
+	alpha-static: 'socks5://127.0.0.1:1080'
 }
 subscription {
 	alpha {

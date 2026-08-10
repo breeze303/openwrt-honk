@@ -16,9 +16,12 @@ grep -F 'preservation=ok' "$tmp/modes.log" >/dev/null
 
 host_tool=${HONK_HOST_TOOL:-}
 if [ -z "$host_tool" ]; then
-	host_tool=$(find "$repo_root/.cache/work" -type f -path '*/target/debug/honk-tool' -perm -111 -print -quit)
+	host_tool=$(find "$repo_root/.cache/work" -type f -path '*/target/debug/honk-tool' -perm -111 -print -quit 2>/dev/null || true)
 fi
-[ -n "$host_tool" ] && [ -x "$host_tool" ]
+if [ -z "$host_tool" ] || [ ! -x "$host_tool" ]; then
+	printf '%s\n' 'honk-tool is required; run tests/run-tests.sh or set HONK_HOST_TOOL' >&2
+	exit 1
+fi
 for name in china-direct gfwlist china-proxy global; do
 	"$host_tool" validate --config "$tmp/$name.dae" --json >"$tmp/$name.json"
 	jq -e '.ok == true' "$tmp/$name.json" >/dev/null

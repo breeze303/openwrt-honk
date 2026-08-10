@@ -1,0 +1,468 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index acdcd1a2699d33741506cc0c224b655b52536c5b..c87f3d8aad87768d47fe03702d38cee35c04e86c 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1633,6 +1633,8 @@ dependencies = [
+  "honk-ebpf-common",
+  "honk-outbound",
+  "libc",
++ "serde_json",
++ "sha2 0.11.0",
+  "tempfile",
+  "tokio",
+  "tracing-subscriber",
+diff --git a/crates/honk-tool/Cargo.toml b/crates/honk-tool/Cargo.toml
+index 67aa59c9eda4ad70f223bab71a55251f8ba86ce3..a68654f4c607d48b4d7fd1287aee41f99e27b436 100644
+--- a/crates/honk-tool/Cargo.toml
++++ b/crates/honk-tool/Cargo.toml
+@@ -21,6 +21,8 @@ tokio.workspace = true
+ url.workspace = true
+ uuid.workspace = true
+ tracing-subscriber.workspace = true
++serde_json.workspace = true
++sha2.workspace = true
+ 
+ [dev-dependencies]
+ tempfile.workspace = true
+diff --git a/crates/honk-tool/src/bpf.rs b/crates/honk-tool/src/bpf.rs
+index 77e8a145fa8b19c1bc1a99c291ce2de3e5067de1..ef7f67e0ccd007c75db632816d9c23ee530263d4 100644
+--- a/crates/honk-tool/src/bpf.rs
++++ b/crates/honk-tool/src/bpf.rs
+@@ -180,18 +180,31 @@ fn sum_percpu_outbound(buf: &[u8]) -> OutboundStatsCounters {
+ }
+ 
+ fn possible_cpus() -> usize {
+-    std::fs::read_dir("/sys/devices/system/cpu")
+-        .map(|rd| {
+-            rd.filter_map(|e| e.ok())
+-                .filter(|e| e.file_name().to_string_lossy().starts_with("cpu"))
+-                .filter(|e| {
+-                    e.file_name()
+-                        .to_string_lossy()
+-                        .chars()
+-                        .nth(3)
+-                        .is_some_and(|c| c.is_ascii_digit())
+-                })
+-                .count()
++    fn range_count(value: &str) -> Option<usize> {
++        value.trim().split(',').try_fold(0usize, |total, item| {
++            let (start, end) = item.split_once('-').unwrap_or((item, item));
++            let start = start.parse::<usize>().ok()?;
++            let end = end.parse::<usize>().ok()?;
++            (end >= start).then_some(total.checked_add(end - start + 1)?)
++        })
++    }
++    std::fs::read_to_string("/sys/devices/system/cpu/possible")
++        .ok()
++        .and_then(|value| range_count(&value))
++        .filter(|&count| count > 0)
++        .or_else(|| {
++            std::fs::read_dir("/sys/devices/system/cpu").ok().map(|rd| {
++                rd.filter_map(|e| e.ok())
++                    .filter(|e| e.file_name().to_string_lossy().starts_with("cpu"))
++                    .filter(|e| {
++                        e.file_name()
++                            .to_string_lossy()
++                            .chars()
++                            .nth(3)
++                            .is_some_and(|c| c.is_ascii_digit())
++                    })
++                    .count()
++            })
+         })
+         .unwrap_or(1)
+         .max(1)
+@@ -235,6 +248,12 @@ pub struct StatsArgs {
+     /// BPF pin root.
+     #[arg(long, default_value = "/sys/fs/bpf")]
+     pub pin_root: PathBuf,
++    /// Emit machine-readable decimal-string counters.
++    #[arg(long)]
++    pub json: bool,
++    /// Sample duration used to calculate byte rates (0 disables sampling).
++    #[arg(long, default_value_t = 0)]
++    pub sample_ms: u64,
+ }
+ 
+ pub async fn run(args: BpfArgs) -> anyhow::Result<()> {
+@@ -400,25 +419,41 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
+     let fd = open(&args.pin_root, "BPF_STATS_MAP")?;
+     let udp_ovf: u64 = read_value(fd, &0u32.to_ne_bytes())?.unwrap_or(0);
+     let tcp_ovf: u64 = read_value(fd, &1u32.to_ne_bytes())?.unwrap_or(0);
+-    println!("conn-state overflow: udp={udp_ovf} tcp={tcp_ovf}");
++    if !args.json {
++        println!("conn-state overflow: udp={udp_ovf} tcp={tcp_ovf}");
++    }
+     let redirect_failures: u64 = read_value(fd, &2u32.to_ne_bytes())?.unwrap_or(0);
+     let handoff_failures: u64 = read_value(fd, &3u32.to_ne_bytes())?.unwrap_or(0);
+     let cookie_failures: u64 = read_value(fd, &4u32.to_ne_bytes())?.unwrap_or(0);
+-    println!(
+-        "auxiliary insert failures: redirect_track={redirect_failures} \
+-         routing_handoff={handoff_failures} cookie_pid={cookie_failures}"
+-    );
++    if !args.json {
++        println!(
++            "auxiliary insert failures: redirect_track={redirect_failures} \
++             routing_handoff={handoff_failures} cookie_pid={cookie_failures}"
++        );
++    }
+ 
+     let fd = open(&args.pin_root, "CONN_STATE_OCCUPANCY")?;
+     let inserts = read_percpu_sum(fd, ncpu, 0)?;
+     let deletes = read_percpu_sum(fd, ncpu, 1)?;
+-    println!(
+-        "conn-state occupancy: inserts={inserts} ebpf_deletes={deletes} raw_live={}",
+-        inserts.saturating_sub(deletes)
+-    );
++    if !args.json {
++        println!(
++            "conn-state occupancy: inserts={inserts} ebpf_deletes={deletes} raw_live={}",
++            inserts.saturating_sub(deletes)
++        );
++    }
+ 
+     let fd = open(&args.pin_root, "OUTBOUND_STATS")?;
+-    println!("\noutbound counters (tx_pkts tx_bytes rx_pkts rx_bytes):");
++    if !args.json {
++        println!("\noutbound counters (tx_pkts tx_bytes rx_pkts rx_bytes):");
++    }
++    let mut before = vec![OutboundStatsCounters::default(); OUTBOUND_STATS_MAP_LEN as usize];
++    if args.sample_ms > 0 {
++        for outbound in 0..OUTBOUND_STATS_MAP_LEN {
++            before[outbound as usize] = read_percpu_outbound(fd, ncpu, outbound)?;
++        }
++        std::thread::sleep(std::time::Duration::from_millis(args.sample_ms));
++    }
++    let mut outbounds = Vec::new();
+     for outbound in 0..OUTBOUND_STATS_MAP_LEN {
+         let counters = read_percpu_outbound(fd, ncpu, outbound)?;
+         if counters.tx_packets != 0
+@@ -426,12 +461,60 @@ pub(crate) fn stats(args: StatsArgs) -> anyhow::Result<()> {
+             || counters.rx_packets != 0
+             || counters.rx_bytes != 0
+         {
+-            println!(
+-                "  outbound {outbound:<4} {} {} {} {}",
+-                counters.tx_packets, counters.tx_bytes, counters.rx_packets, counters.rx_bytes
+-            );
++            if args.json {
++                let (tx_rate, rx_rate) = if args.sample_ms > 0 {
++                    let previous = before[outbound as usize];
++                    (
++                        counters
++                            .tx_bytes
++                            .saturating_sub(previous.tx_bytes)
++                            .saturating_mul(1000)
++                            .checked_div(args.sample_ms)
++                            .unwrap_or(0),
++                        counters
++                            .rx_bytes
++                            .saturating_sub(previous.rx_bytes)
++                            .saturating_mul(1000)
++                            .checked_div(args.sample_ms)
++                            .unwrap_or(0),
++                    )
++                } else {
++                    (0, 0)
++                };
++                outbounds.push(serde_json::json!({
++                    "id": outbound,
++                    "txPackets": counters.tx_packets.to_string(),
++                    "txBytes": counters.tx_bytes.to_string(),
++                    "rxPackets": counters.rx_packets.to_string(),
++                    "rxBytes": counters.rx_bytes.to_string(),
++                    "txBytesPerSecond": tx_rate.to_string(),
++                    "rxBytesPerSecond": rx_rate.to_string(),
++                }));
++            } else {
++                println!(
++                    "  outbound {outbound:<4} {} {} {} {}",
++                    counters.tx_packets, counters.tx_bytes, counters.rx_packets, counters.rx_bytes
++                );
++            }
+         }
+     }
++    if args.json {
++        println!(
++            "{}",
++            serde_json::json!({
++                "ok": true,
++                "available": true,
++                "sampleMs": args.sample_ms,
++                "overflow": { "udp": udp_ovf.to_string(), "tcp": tcp_ovf.to_string() },
++                "occupancy": {
++                    "inserts": inserts.to_string(),
++                    "deletes": deletes.to_string(),
++                    "live": inserts.saturating_sub(deletes).to_string(),
++                },
++                "outbounds": outbounds,
++            })
++        );
++    }
+     Ok(())
+ }
+ 
+diff --git a/crates/honk-tool/src/diagnose.rs b/crates/honk-tool/src/diagnose.rs
+index d5b87d903a2cb63813fd59713586d9b965e6946f..3b3fc2a489bf41223517afebdc4893a1becafa21 100644
+--- a/crates/honk-tool/src/diagnose.rs
++++ b/crates/honk-tool/src/diagnose.rs
+@@ -64,6 +64,8 @@ pub async fn run(args: DiagnoseArgs) -> anyhow::Result<()> {
+     // 5. Occupancy + overflow via the bpf stats path.
+     match super::bpf::stats(super::bpf::StatsArgs {
+         pin_root: args.pin_root.clone(),
++        json: false,
++        sample_ms: 0,
+     }) {
+         Ok(()) => {}
+         Err(e) => {
+diff --git a/crates/honk-tool/src/main.rs b/crates/honk-tool/src/main.rs
+index e3a6894a4d4130433eecd20be8adc8c27869e60e..abc0cdc251cb3659db37b4a602993cbe736f9aef 100644
+--- a/crates/honk-tool/src/main.rs
++++ b/crates/honk-tool/src/main.rs
+@@ -2,12 +2,13 @@
+ //!
+ //! Currently implemented: `sub` (subscription availability check),
+ //! `bpf` (pinned-map quick reads), `diagnose` (one-shot health check),
+-//! `geosite` / `geoip` (dat file content search).
++//! `validate`, and `geosite` / `geoip` (dat file content search).
+ 
+ mod bpf;
+ mod diagnose;
+ mod geo;
+ mod sub;
++mod validate;
+ 
+ use clap::{Parser, Subcommand};
+ 
+@@ -32,6 +33,8 @@ enum Command {
+     Geosite(geo::GeositeArgs),
+     /// Search geoip.dat: list codes, show CIDRs, longest-prefix IP lookup.
+     Geoip(geo::GeoipArgs),
++    /// Parse and validate a Honk configuration without starting the engine.
++    Validate(validate::ValidateArgs),
+ }
+ 
+ #[tokio::main]
+@@ -49,5 +52,6 @@ async fn main() -> anyhow::Result<()> {
+         Command::Diagnose(args) => diagnose::run(args).await,
+         Command::Geosite(args) => geo::run_geosite(args),
+         Command::Geoip(args) => geo::run_geoip(args),
++        Command::Validate(args) => validate::run(args),
+     }
+ }
+diff --git a/crates/honk-tool/src/sub.rs b/crates/honk-tool/src/sub.rs
+index 5aad6b745bf6507b7da540adf3c75683a0195eea..2a0ecb19ce9f166f07e65da6fa4456aa9a75f9dd 100644
+--- a/crates/honk-tool/src/sub.rs
++++ b/crates/honk-tool/src/sub.rs
+@@ -7,6 +7,7 @@
+ 
+ use std::io::Read as _;
+ use std::net::SocketAddr;
++use std::path::PathBuf;
+ use std::sync::Arc;
+ use std::time::{Duration, Instant};
+ 
+@@ -81,6 +82,12 @@ impl ProbeFailureKind {
+ pub struct SubArgs {
+     /// Subscription URL (http/https) or a local file with one share link per line.
+     pub source: String,
++    /// Parse this already downloaded subscription payload instead of fetching source.
++    #[arg(long, value_name = "PATH")]
++    pub payload_file: Option<PathBuf>,
++    /// Output format. JSON emits the parsed node list without probing it.
++    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
++    pub format: OutputFormat,
+     /// Test target for proxied connectivity/latency (host:port).
+     #[arg(long, default_value = "cp.cloudflare.com:443")]
+     pub target: String,
+@@ -116,6 +123,12 @@ pub struct SubArgs {
+     pub v6_target: Option<SocketAddr>,
+ }
+ 
++#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
++pub enum OutputFormat {
++    Text,
++    Json,
++}
++
+ struct ProbeOutcome {
+     node_name: String,
+     shape: String,
+@@ -132,6 +145,10 @@ struct ProbeOutcome {
+ pub async fn run(args: SubArgs) -> anyhow::Result<()> {
+     configure_tls(&args)?;
+     let mut nodes = load_nodes(&args).await?;
++    if args.format == OutputFormat::Json {
++        println!("{}", serde_json::to_string(&nodes)?);
++        return Ok(());
++    }
+     if args.limit > 0 {
+         nodes.truncate(args.limit);
+     }
+@@ -240,6 +257,19 @@ fn parse_subscription_url_from_stdin(input: &str) -> anyhow::Result<String> {
+ 
+ /// Load nodes from a subscription URL or a local share-link file.
+ async fn load_nodes(args: &SubArgs) -> anyhow::Result<Vec<Node>> {
++    if let Some(path) = args.payload_file.as_deref() {
++        let content = std::fs::read_to_string(path)
++            .with_context(|| format!("read payload '{}'", path.display()))?;
++        let sub = Subscription {
++            name: "payload".into(),
++            url: args.source.clone(),
++            sub_type: SubscriptionType::Custom,
++            user_agent: args.ua.clone(),
++            ..Default::default()
++        };
++        return honk_core::subscription::parse_subscription_content(&sub, &content)
++            .context("parse subscription payload");
++    }
+     let source = if args.source == "-" {
+         let mut input = String::new();
+         std::io::stdin()
+diff --git a/crates/honk-tool/src/validate.rs b/crates/honk-tool/src/validate.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..0d4ddf15384cc94e43212e85a28c2f32e0e200ad
+--- /dev/null
++++ b/crates/honk-tool/src/validate.rs
+@@ -0,0 +1,141 @@
++use anyhow::Result;
++use clap::Args;
++use honk_config::Config;
++use honk_config::dns::{DnsCond, DnsDomainMatcher};
++use serde_json::json;
++use sha2::{Digest, Sha256};
++use std::fs;
++use std::path::PathBuf;
++
++fn hex_digest(bytes: &[u8]) -> String {
++    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
++}
++
++fn diagnostic_code(message: &str) -> (&'static str, i32) {
++    let lower = message.to_ascii_lowercase();
++    if lower.contains("unsupported") || lower.contains("unsafe") {
++        ("UNSAFE", 3)
++    } else {
++        ("SYNTAX", 2)
++    }
++}
++
++fn collect_dns_geo(config: &Config, geosite: &mut Vec<String>, geoip: &mut Vec<String>) {
++    let mut collect_conditions = |conditions: &[DnsCond]| {
++        for condition in conditions {
++            match condition {
++                DnsCond::Qname { matchers, .. } => {
++                    for matcher in matchers {
++                        if let DnsDomainMatcher::Geosite(code) = matcher {
++                            geosite.push(code.clone());
++                        }
++                    }
++                }
++                DnsCond::Ip { geoip: codes, .. } => geoip.extend(codes.iter().cloned()),
++                _ => {}
++            }
++        }
++    };
++    for rule in &config.dns.routing.request.rules {
++        collect_conditions(&rule.conditions);
++    }
++    for rule in &config.dns.routing.response.rules {
++        collect_conditions(&rule.conditions);
++    }
++    for rule in &config.dns.routing.rules {
++        if let Some(code) = rule.domain.strip_prefix("geosite:") {
++            geosite.push(code.to_string());
++        }
++        if let Some(code) = rule.domain.strip_prefix("geoip:") {
++            geoip.push(code.to_string());
++        }
++    }
++    geosite.sort_unstable();
++    geosite.dedup();
++    geoip.sort_unstable();
++    geoip.dedup();
++}
++
++#[derive(Args)]
++pub struct ValidateArgs {
++    /// Configuration path. The path is fixed by the OpenWrt service wrapper.
++    #[arg(long, conflicts_with = "config_fd")]
++    pub config: Option<PathBuf>,
++    /// Read the configuration from an already-open file descriptor.
++    #[arg(long, conflicts_with = "config")]
++    pub config_fd: Option<i32>,
++    /// Logical path used in diagnostics when reading from a file descriptor.
++    #[arg(long, default_value = "<config-fd>")]
++    pub logical_path: String,
++    /// Emit a machine-readable result.
++    #[arg(long)]
++    pub json: bool,
++}
++
++pub fn run(args: ValidateArgs) -> Result<()> {
++    let path = if let Some(fd) = args.config_fd {
++        format!("/proc/self/fd/{fd}")
++    } else {
++        args.config
++            .unwrap_or_else(|| PathBuf::from("/etc/honk/config.dae"))
++            .to_string_lossy()
++            .into_owned()
++    };
++
++    let bytes = match fs::read(&path) {
++        Ok(bytes) => bytes,
++        Err(error) => {
++            if args.json {
++                println!(
++                    "{}",
++                    json!({"schemaVersion":"honk.validate.v1","ok":false,"path":args.logical_path,"configSha256":null,"parserVersion":"honk-config-v1","diagnostics":[{"code":"IO","message":error.to_string()}]})
++                );
++            }
++            std::process::exit(4);
++        }
++    };
++    let mut digest = Sha256::new();
++    digest.update(&bytes);
++    let config_sha = hex_digest(digest.finalize().as_ref());
++    let parsed = Config::from_file(&path);
++    let result = parsed
++        .as_ref()
++        .map_err(|e| e.to_string())
++        .and_then(|config| config.validate().map_err(|e| e.to_string()));
++    match result {
++        Ok(()) => {
++            if args.json {
++                let mut geosite = Vec::new();
++                let mut geoip = Vec::new();
++                if let Ok(config) = parsed {
++                    for rule in &config.routing.rules {
++                        geosite.extend(rule.condition.geosite.iter().cloned());
++                        geoip.extend(rule.condition.geo_ip.iter().cloned());
++                    }
++                    collect_dns_geo(&config, &mut geosite, &mut geoip);
++                }
++                geosite.sort_unstable();
++                geosite.dedup();
++                geoip.sort_unstable();
++                geoip.dedup();
++                println!(
++                    "{}",
++                    json!({"schemaVersion":"honk.validate.v1","ok":true,"path":args.logical_path,"configSha256":config_sha,"parserVersion":"honk-config-v1","geo":{"geosite":geosite,"geoip":geoip},"diagnostics":[]})
++                );
++            } else {
++                println!("configuration is valid: {}", path);
++            }
++            Ok(())
++        }
++        Err(error) => {
++            let (diagnostic, exit_code) = diagnostic_code(&error);
++            if args.json {
++                println!(
++                    "{}",
++                    json!({"schemaVersion":"honk.validate.v1","ok":false,"path":args.logical_path,"configSha256":config_sha,"parserVersion":"honk-config-v1","diagnostics":[{"code":diagnostic,"message":error}]})
++                );
++            }
++            std::process::exit(exit_code);
++        }
++    }
++}

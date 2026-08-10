@@ -64,6 +64,17 @@ for _, name in ipairs({ "china-direct", "gfwlist", "china-proxy", "global" }) do
 	assert(routing_rule_count(compiled.candidate, "dip(geoip: private) -> direct") == 1, "private rule duplicated")
 	assert(compiled.candidate:find("direct-dns", 1, true), "new direct DNS name missing")
 	assert(compiled.candidate:find("proxy-dns", 1, true), "new proxy DNS name missing")
+	assert(compiled.candidate:find("honk-proxy {", 1, true), "managed proxy group missing")
+	assert(compiled.candidate:find("filter: name('fixture-node')", 1, true), "selected node missing from managed proxy group")
+	if name == "gfwlist" then
+		assert(compiled.candidate:find("domain(geosite: gfw) -> honk-proxy", 1, true), "GFW mode does not route through the managed group")
+	elseif name == "china-direct" then
+		assert(compiled.candidate:find("fallback: honk-proxy", 1, true), "China-direct fallback does not use the managed group")
+	elseif name == "china-proxy" then
+		assert(compiled.candidate:find("dip(geoip: cn) -> honk-proxy", 1, true), "China-proxy IP rule does not use the managed group")
+	else
+		assert(compiled.candidate:find("fallback: honk-proxy", 1, true), "global fallback does not use the managed group")
+	end
 	assert(compiled.candidate:find("bootstrap_resolver: 'udp://223.5.5.5:53'", 1, true), "bootstrap resolver missing")
 	assert(compiled.candidate:find("bind: 'tcp+udp://127.0.0.1:1053'", 1, true), "dnsmasq listener bind missing")
 	local projected_dns = require "luci.model.dns".current(compiled.candidate)

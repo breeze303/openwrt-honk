@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=honk
 PKG_VERSION:=0.0.1_git
-PKG_RELEASE:=22
+PKG_RELEASE:=24
 PKG_LICENSE:=GPL-3.0-only
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=Honk OpenWrt feed
@@ -46,6 +46,9 @@ RUST_TARGET:=$(RUSTC_TARGET_ARCH)
 BPF_RUST_TOOLCHAIN?=nightly-2026-07-20
 BPF_CARGO?=rustup run $(BPF_RUST_TOOLCHAIN) cargo
 BPF_RUSTC?=$(shell rustup which --toolchain $(BPF_RUST_TOOLCHAIN) rustc 2>/dev/null)
+# The upstream eBPF crate owns the optimization and BTF flags.  Override only
+# its development-machine linker path for the OpenWrt host toolchain.
+BPF_CARGO_CONFIG:=target.bpfel-unknown-none.rustflags=["-Clinker=bpf-linker"]
 HONK_CORE_BINARY:=$(PKG_BUILD_DIR)/target/$(RUST_TARGET)/release/honk-core
 HONK_TOOL_BINARY:=$(PKG_BUILD_DIR)/target/$(RUST_TARGET)/release/honk-tool
 
@@ -61,7 +64,7 @@ define Build/Compile
 		CARGO_HOME=$(CARGO_HOME) \
 		RUSTC=$(BPF_RUSTC) \
 		RUSTUP_TOOLCHAIN=$(BPF_RUST_TOOLCHAIN) \
-		$(BPF_CARGO) build --locked --release -Zbuild-std=core --target bpfel-unknown-none
+		$(BPF_CARGO) --config '$(BPF_CARGO_CONFIG)' build --locked --release -Zbuild-std=core --target bpfel-unknown-none
 	+cd $(PKG_BUILD_DIR) && \
 		$(CARGO_PKG_CONFIG_VARS) \
 		CC_$(subst -,_,$(RUST_TARGET))=$(TARGET_CC_NOCACHE) \

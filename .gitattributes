@@ -1,0 +1,2 @@
+# Unified diffs use a leading space to represent blank context lines.
+honk/patches/*.patch whitespace=-trailing-space

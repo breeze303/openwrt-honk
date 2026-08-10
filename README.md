@@ -59,7 +59,7 @@ The commands below target Ubuntu/Debian. Other Linux distributions need equivale
 sudo apt-get update
 sudo apt-get install -y \
   git curl jq patch tar gzip zstd binutils \
-  clang llvm libbpf-dev libclang-dev pkg-config cmake
+  clang llvm libbpf-dev libclang-dev pkg-config cmake lua5.4 ripgrep
 ~~~
 
 The source build runs inside the OpenWrt SDK. The SDK helper installs Rustup, the pinned BPF nightly toolchain, the pinned Rust feed revision, and `bpf-linker` `0.10.4`:
@@ -121,15 +121,18 @@ The generated assets are committed below `luci-app-honk/root/www/luci-static/res
 Run the repository checks before publishing a package:
 
 ~~~sh
+rustup toolchain install 1.97.1 --profile minimal
 bash tests/run-tests.sh
 git diff --check
 ~~~
+
+When no cached host tool is available, the check builds `honk-tool` from the locked archive with Rust `1.97.1` before exercising the LuCI contracts.
 
 ### GitHub Actions
 
 `Update Honk upstream` checks upstream `main` every day. When a new revision is available, it downloads the commit archive, calculates its SHA-256 and Git tree, validates every local patch, and creates or updates the `automation/honk-upstream` PR. It can also be run manually from the Actions page. Patch conflicts stop the refresh and retain the current buildable revision.
 
-`Build packages` builds all APK/IPK variants from source in an OpenWrt SDK matrix. Successful `main` and manually dispatched builds retain a shared Rust/BPF cache plus a target-isolated cache for OpenWrt downloads, the Rust host installation, and a size-limited `sccache` directory. Pull requests restore these caches but do not write them. Package build directories and generated APK/IPK files are deliberately excluded, so every run still compiles the current Honk and LuCI sources.
+`Build packages` builds all APK/IPK variants from source in an OpenWrt SDK matrix. Successful `main` and manually dispatched builds retain a shared Cargo/Rustup/Rust-feed/BPF-tool cache plus a target-isolated cache for OpenWrt downloads and a size-limited `sccache` directory. Pull requests restore these caches but do not write them. Package build directories and generated APK/IPK files are deliberately excluded, so every run still compiles the current Honk and LuCI sources.
 
 `Build packages` directly builds Honk from its locked upstream source in each OpenWrt SDK matrix job. The helper installs the pinned Rust host feed, nightly `rust-src`, and verified `bpf-linker` before invoking `package/honk/download` and `package/honk/compile`. The matrix builds:
 

@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y jq patch lua5.4
+          sudo apt-get install -y jq patch lua5.4 ripgrep clang llvm libclang-dev pkg-config cmake
 
       - name: Update immutable source lock
         id: source
@@ -38,6 +38,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rustup toolchain install 1.97.1 --profile minimal
           source_commit=$(jq -er '.source.commit' locks/source.lock.json)
           bash .github/scripts/verify-source-lock.sh \
             --commit "$source_commit" \
@@ -45,7 +46,7 @@ jobs:
             --check-archive \
             --check-mirror-hash \
             --receipt-dir "$RUNNER_TEMP/source-lock-receipt"
-          bash tests/run-tests.sh
+          HONK_TEST_RUST_TOOLCHAIN=1.97.1 bash tests/run-tests.sh
           git diff --check
 
       - name: Create or update source refresh PR

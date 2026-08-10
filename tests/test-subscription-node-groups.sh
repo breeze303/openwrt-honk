@@ -22,7 +22,7 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 commit=$(jq -er '.source.commit' "$repo_root/locks/source.lock.json")
 archive=$(jq -er '.source.archive.offlinePath' "$repo_root/locks/source.lock.json")
 top=$(jq -er '.source.archive.topLevelDirectory' "$repo_root/locks/source.lock.json")
-patch_path="honk/patches/100-openwrt-main-contracts.patch"
+patch_path="honk/patches/100-openwrt-runtime-contracts.patch"
 patch_sha=$(jq -er --arg path "$patch_path" '.source.patchDigests[] | select(.path == $path) | .sha256' "$repo_root/locks/source.lock.json")
 actual_sha=$(sha256sum "$repo_root/$patch_path" | cut -d ' ' -f1)
 [ "$actual_sha" = "$patch_sha" ] || fail "subscription patch digest drift"

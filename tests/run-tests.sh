@@ -29,8 +29,11 @@ grep -F 'pub json: bool' "$source_dir/crates/honk-tool/src/bpf.rs" >/dev/null
 grep -F 'pub sample_ms: u64' "$source_dir/crates/honk-tool/src/bpf.rs" >/dev/null
 grep -F '.route("/memory", get(get_memory))' "$source_dir/crates/honk-core/src/clash_api.rs" >/dev/null
 grep -F '.route("/subscriptions", get(get_subscriptions))' "$source_dir/crates/honk-core/src/clash_api.rs" >/dev/null
-grep -F 'test_override_outbound_rule_mode_uses_primary_for_proxy_routes' "$source_dir/crates/honk-core/src/mode.rs" >/dev/null
-grep -F 'outbound_name != "direct" && !self.global_selection.is_empty() && selection_resolvable' "$source_dir/crates/honk-core/src/mode.rs" >/dev/null
+grep -F 'test_override_outbound_rule_mode_keeps_routing' "$source_dir/crates/honk-core/src/mode.rs" >/dev/null
+if rg -n 'connect_transport_with_initial_data|wrap_transport_with_initial_data|wrap_ws_with_early_data' "$source_dir/crates"; then
+	echo 'unused WebSocket early-data transport paths must not be carried by OpenWrt patches' >&2
+	exit 1
+fi
 
 sh -n honk/files/honk.init
 sh -n honk/files/honk-launcher
@@ -48,6 +51,8 @@ bash -n tests/test-luci-package-isolation.sh
 bash -n tests/test-init-geo-contract.sh
 grep -F 'BPF_RUST_TOOLCHAIN?=nightly-2026-07-20' honk/Makefile >/dev/null
 grep -F 'PKG_BUILD_DEPENDS:=rust/host' honk/Makefile >/dev/null
+grep -F 'BPF_CARGO_CONFIG:=target.bpfel-unknown-none.rustflags=' honk/Makefile >/dev/null
+grep -F -- "\$(BPF_CARGO) --config" honk/Makefile >/dev/null
 grep -F 'PKG_SOURCE_URL:=https://github.com/Glassyiris/honk/archive' honk/source.mk >/dev/null
 grep -F 'cargo build --locked --release' honk/Makefile >/dev/null
 grep -F '+v2ray-geoip +v2ray-geosite' honk/Makefile >/dev/null
@@ -68,7 +73,7 @@ if rg -n 'geo(site|ip)_url|allow_custom_geo' honk/files/honk.config luci-app-hon
 	echo 'Geo URL settings must not be part of the Honk package contract' >&2
 	exit 1
 fi
-grep -F 'pub fn parse_subscription_content' honk/patches/100-openwrt-main-contracts.patch >/dev/null
+grep -F 'pub fn parse_subscription_content' "$source_dir/crates/honk-core/src/subscription.rs" >/dev/null
 grep -F 'openwrt-24.10' .github/workflows/build-packages.yml >/dev/null
 grep -F 'openwrt-25.12' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: ipk' .github/workflows/build-packages.yml >/dev/null
@@ -183,12 +188,25 @@ bash tests/test-quick-setup-contract.sh --evidence "$evidence_root/quick-contrac
 bash tests/test-dns-projection.sh --evidence "$evidence_root/dns"
 bash tests/test-quick-transaction.sh --evidence "$evidence_root/quick-transaction"
 bash tests/test-luci-package-isolation.sh
-grep -F 'pub payload_file: Option<PathBuf>' honk/patches/100-openwrt-main-contracts.patch >/dev/null
-grep -F 'parse_subscription_content(&sub, &content)' honk/patches/100-openwrt-main-contracts.patch >/dev/null
-grep -F 'SubscriptionType::Custom' honk/patches/100-openwrt-main-contracts.patch >/dev/null
-grep -F 'registry_mount_exists' honk/patches/100-openwrt-main-contracts.patch >/dev/null
-grep -F 'canonical_path' honk/patches/100-openwrt-main-contracts.patch >/dev/null
-bash tests/test-luci-v2-contract.sh
+grep -F 'pub payload_file: Option<PathBuf>' "$source_dir/crates/honk-tool/src/sub.rs" >/dev/null
+grep -F 'parse_subscription_content(&sub, &content)' "$source_dir/crates/honk-tool/src/sub.rs" >/dev/null
+grep -F 'SubscriptionType::Custom' "$source_dir/crates/honk-tool/src/sub.rs" >/dev/null
+grep -F 'registry_mount_exists' "$source_dir/crates/honk-core/src/lib.rs" >/dev/null
+grep -F 'canonical_path' "$source_dir/crates/honk-core/src/lib.rs" >/dev/null
+if rg -n '^diff --git a/(crates/honk-core/src/(mode|control/connection)\.rs|crates/honk-outbound/src/proxy/transport\.rs|crates/honk-ebpf/\.cargo/config\.toml|doc/)' honk/patches; then
+	echo 'OpenWrt patches contain behavior now owned by configuration or the package build' >&2
+	exit 1
+fi
+host_tool=${HONK_HOST_TOOL:-}
+if [ -z "$host_tool" ]; then
+	host_tool=$(find "$repo_root/.cache/work" -type f -path '*/target/debug/honk-tool' -perm -111 -print -quit 2>/dev/null || true)
+fi
+if [ -z "$host_tool" ] || [ ! -x "$host_tool" ]; then
+	RUSTUP_TOOLCHAIN="${HONK_TEST_RUST_TOOLCHAIN:-1.97.1}" \
+		cargo build --locked --manifest-path "$source_dir/Cargo.toml" -p honk-tool
+	host_tool="$source_dir/target/debug/honk-tool"
+fi
+HONK_HOST_TOOL="$host_tool" bash tests/test-luci-v2-contract.sh
 bash tests/test-target-harness-contract.sh "$evidence_root/target-harness"
 .github/scripts/check-dashboard-assets.sh --manifest "$evidence_root/assets.json"
 
