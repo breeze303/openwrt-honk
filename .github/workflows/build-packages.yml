@@ -255,6 +255,57 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Remove stale assets from existing release
+        uses: actions/github-script@v8
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        with:
+          script: |
+            const fs = require('fs');
+            const currentAssets = new Set(
+              fs.readdirSync('release-assets', { withFileTypes: true })
+                .filter((entry) => entry.isFile())
+                .map((entry) => entry.name),
+            );
+            const { owner, repo } = context.repo;
+            let release;
+
+            try {
+              ({ data: release } = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: process.env.RELEASE_TAG,
+              }));
+            } catch (error) {
+              if (error.status === 404) {
+                core.info('Release does not exist yet; no stale assets to remove.');
+                return;
+              }
+              throw error;
+            }
+
+            const assets = await github.paginate(
+              github.rest.repos.listReleaseAssets,
+              {
+                owner,
+                repo,
+                release_id: release.id,
+                per_page: 100,
+              },
+            );
+
+            for (const asset of assets) {
+              if (currentAssets.has(asset.name)) {
+                continue;
+              }
+              core.info(`Deleting stale release asset: ${asset.name}`);
+              await github.rest.repos.deleteReleaseAsset({
+                owner,
+                repo,
+                asset_id: asset.id,
+              });
+            }
+
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@v2
         with:
