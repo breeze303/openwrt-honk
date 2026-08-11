@@ -7,13 +7,13 @@
 发布构建包含两个软件包：
 
 - honk：honk-core、honk-tool、procd 服务、默认配置、eBPF 资源和运行日志。
-- luci-app-honk：新版独立 LuCI 控制器、模式/DNS 生成器、节点与设备规则、诊断和前端页面。
+- luci-app-honk：原生 LuCI view、RPCD Ucode 服务、模式/DNS 生成器、节点与设备规则、诊断和前端页面。
 
 构建使用 `locks/source.lock.json` 中记录的上游提交，当前支持 OpenWrt x86_64 和 aarch64。定时工作流每天检查 Honk `main`，并为通过源码、哈希和补丁验证的新提交创建更新 PR。
 
 ## 界面展示
 
-管理界面是原生 LuCI 单页应用，不会下载或嵌入第二套外部面板。
+管理界面使用原生 LuCI view 承载同源 iframe 中提交的 Vue 应用。版本化 `postMessage` bridge 调用 `luci.honk` RPCD Ucode 对象，iframe 不会获得 LuCI session ID，也不会访问直接的 `/api/*` 端点。
 
 | 概览 | 配置 |
 | --- | --- |
@@ -84,7 +84,7 @@ tar --zstd -xf /tmp/bpf-linker.tar.zst -C "$HOME/.cargo/bin"
 
 ### OpenWrt 运行依赖
 
-`honk` 软件包声明 `ca-bundle`、`ip-full`、`tc-full`、`nsenter`、`libstdcpp`、`jq`、`kmod-sched-core`、`kmod-sched-bpf`、`kmod-veth`、`v2ray-geoip` 和 `v2ray-geosite`。LuCI 软件包还需要 `luci-base`、`luci-compat`、`curl`。目标内核需要提供 `CONFIG_BPF`、`CONFIG_BPF_SYSCALL`、`CONFIG_BPF_JIT`、`CONFIG_CGROUP_BPF`、`CONFIG_NET_CLS_BPF`、`CONFIG_NET_SCH_INGRESS`、`CONFIG_NET_CLS_ACT`、`CONFIG_NET_NS`、`CONFIG_VETH` 和 `CONFIG_DEBUG_INFO_BTF`。
+`honk` 软件包声明 `ca-bundle`、`ip-full`、`tc-full`、`nsenter`、`libstdcpp`、`jq`、`kmod-sched-core`、`kmod-sched-bpf`、`kmod-veth`、`v2ray-geoip` 和 `v2ray-geosite`。LuCI 软件包还需要 `luci-base`、`curl`、`rpcd-mod-ucode`、`ucode-mod-fs`、`ucode-mod-uci` 和 `ucode-mod-ubus`，不依赖 Lua runtime。目标内核需要提供 `CONFIG_BPF`、`CONFIG_BPF_SYSCALL`、`CONFIG_BPF_JIT`、`CONFIG_CGROUP_BPF`、`CONFIG_NET_CLS_BPF`、`CONFIG_NET_SCH_INGRESS`、`CONFIG_NET_CLS_ACT`、`CONFIG_NET_NS`、`CONFIG_VETH` 和 `CONFIG_DEBUG_INFO_BTF`。
 
 GeoSite 与 GeoIP 由 OpenWrt 的 `v2ray-geosite`、`v2ray-geoip` 软件包安装到 `/usr/share/v2ray/geosite.dat`、`/usr/share/v2ray/geoip.dat`。Honk 在构建和运行期间均不下载、打包、修改或锁定 Geo 数据；用户可通过 OpenWrt 软件包管理器自行安装和更新这些数据包。
 
@@ -121,7 +121,7 @@ bash tests/run-tests.sh
 git diff --check
 ~~~
 
-没有可复用的主机工具缓存时，检查会使用 Rust `1.97.1` 从锁定归档构建 `honk-tool`，再执行 LuCI 契约校验。
+没有可复用的主机工具缓存时，检查会使用 Rust `1.97.1` 从锁定归档构建 `honk-tool`，再校验 LuCI 配置 fixture。SDK 和目标检查会使用目标 Ucode runtime 编译 Ucode 模块和 RPCD 服务。
 
 ### GitHub Actions
 
@@ -154,7 +154,7 @@ LuCI 页面地址：
 /cgi-bin/luci/admin/services/honk
 ~~~
 
-页面地址为 `/cgi-bin/luci/admin/services/honk`。控制器会保留现有节点、订阅、experimental 和未知 section，只重建自己管理的模式 section。每次应用都会校验、备份、原子写入、重启、健康检查，失败时恢复上一份配置。
+页面地址为 `/cgi-bin/luci/admin/services/honk`。`luci.honk` RPCD Ucode 服务会保留现有节点、订阅、experimental、注释和未知 section，只重建自己管理的模式 section。每次应用都会校验、备份、原子写入、重启、健康检查，失败时恢复上一份配置。
 
 ## Quick Setup 与 Geo 资产
 
@@ -162,7 +162,7 @@ Quick Setup 永远是 Honk 的首个页面。它复用现有订阅和节点数�
 
 GeoSite 与 GeoIP 直接从 `/usr/share/v2ray` 读取。新版诊断页会分别显示文件存在状态、所属 OpenWrt 软件包、路径和文件大小；使用 OpenWrt 软件包管理器安装或更新 `v2ray-geosite`、`v2ray-geoip` 即可管理这些数据。
 
-Quick mutation 由 `/usr/libexec/honk/quick-transaction-worker` 处理。它把旧配置字节保存到 root-only sidecar，记录每个可恢复阶段；重启、订阅等待或 probe 失败时恢复之前的运行或停止状态。恢复本身失败会明确标记为 `degraded`，等待运维处理。直连预设不要求代理订阅即可应用；其他预设必须有非空且已校验的源组，并通过 Geo、DNS、接口门禁。
+Quick mutation 由 `/usr/libexec/honk/quick-transaction-worker` 处理。它把旧配置字节保存到 root-only sidecar，记录每个可恢复阶段；重启、订阅等待或 probe 失败时恢复之前的运行或停止状态。订阅来源修改和运行时准备使用 `preserve` 策略，停止状态下编辑不会启动 Honk。恢复本身失败会明确标记为 `degraded`，等待运维处理。直连预设不要求代理订阅即可应用；其他预设必须有非空且已校验的源组，并通过 Geo、DNS、接口门禁。
 
 ## 运行路径
 
@@ -174,6 +174,8 @@ Quick mutation 由 `/usr/libexec/honk/quick-transaction-worker` 处理。它把�
 | UCI 服务设置 | /etc/config/honk |
 | init 脚本 | /etc/init.d/honk |
 | 运行日志 | /tmp/honk/honk.log |
+| RPCD Ucode 服务 | /usr/share/rpcd/ucode/luci.honk |
+| LuCI Ucode 模块 | /usr/share/ucode/luci/honk/ |
 | LuCI 资源 | /www/luci-static/resources/honk/app/ |
 
 命令行校验和启动：
@@ -182,6 +184,8 @@ Quick mutation 由 `/usr/libexec/honk/quick-transaction-worker` 处理。它把�
 honk-tool validate --config /etc/honk/config.dae --json
 /etc/init.d/honk enable
 /etc/init.d/honk start
+ubus -v list luci.honk
+ubus call luci.honk state
 ~~~
 
 `config.dae.default` 是软件包提供的完整 Honk 基线，不作为 conffile；`config.dae` 是用户实际配置，
@@ -288,7 +292,7 @@ git diff --check
 cd luci-app-honk/ui && npm ci && npm run build
 ~~~
 
-检查脚本会校验源码和补丁摘要、OpenWrt Geo 软件包集成、Shell/Lua 语法、RPC/menu 清单、构建资源以及 LuCI 桥接使用的 Quick Setup/事务契约。
+检查脚本会校验源码和补丁摘要、OpenWrt Geo 软件包集成、Shell/Ucode 语法、RPC/menu 清单、构建资源以及 LuCI 桥接使用的 Quick Setup/事务契约。
 
 ## 上游文档
 

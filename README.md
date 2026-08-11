@@ -7,13 +7,13 @@ This repository packages [Honk](https://github.com/Glassyiris/honk), a Rust/eBPF
 The release build contains two packages:
 
 - honk: honk-core, honk-tool, the procd service, default configuration, eBPF assets, and runtime logging.
-- luci-app-honk: the new standalone LuCI controller, mode/DNS generator, node and device workflow, diagnostics, and dashboard.
+- luci-app-honk: a native LuCI view, RPCD Ucode service, mode/DNS generator, node and device workflow, diagnostics, and dashboard.
 
 Builds use the exact upstream commit recorded in `locks/source.lock.json`. The package currently targets OpenWrt x86_64 and aarch64. A scheduled workflow checks Honk `main` daily and opens an update PR for revisions that pass source, checksum, and patch validation.
 
 ## Screenshots
 
-The dashboard is a single native LuCI page. It does not download or embed a second external dashboard.
+The dashboard is a native LuCI view hosting the committed Vue application in a same-origin iframe. Its versioned `postMessage` bridge calls the `luci.honk` RPCD Ucode object, so the iframe never receives a LuCI session ID or direct `/api/*` endpoint.
 
 | Overview | Configuration |
 | --- | --- |
@@ -84,7 +84,7 @@ Building the LuCI dashboard requires Node.js 22 and npm. Rust and the eBPF linke
 
 ### OpenWrt runtime dependencies
 
-The `honk` package declares `ca-bundle`, `ip-full`, `tc-full`, `nsenter`, `libstdcpp`, `jq`, `kmod-sched-core`, `kmod-sched-bpf`, `kmod-veth`, `v2ray-geoip`, and `v2ray-geosite`. The LuCI package adds `luci-base`, `luci-compat`, and `curl`. The target kernel must provide `CONFIG_BPF`, `CONFIG_BPF_SYSCALL`, `CONFIG_BPF_JIT`, `CONFIG_CGROUP_BPF`, `CONFIG_NET_CLS_BPF`, `CONFIG_NET_SCH_INGRESS`, `CONFIG_NET_CLS_ACT`, `CONFIG_NET_NS`, `CONFIG_VETH`, and `CONFIG_DEBUG_INFO_BTF`.
+The `honk` package declares `ca-bundle`, `ip-full`, `tc-full`, `nsenter`, `libstdcpp`, `jq`, `kmod-sched-core`, `kmod-sched-bpf`, `kmod-veth`, `v2ray-geoip`, and `v2ray-geosite`. The LuCI package adds `luci-base`, `curl`, `rpcd-mod-ucode`, `ucode-mod-fs`, `ucode-mod-uci`, and `ucode-mod-ubus`, with no Lua runtime dependency. The target kernel must provide `CONFIG_BPF`, `CONFIG_BPF_SYSCALL`, `CONFIG_BPF_JIT`, `CONFIG_CGROUP_BPF`, `CONFIG_NET_CLS_BPF`, `CONFIG_NET_SCH_INGRESS`, `CONFIG_NET_CLS_ACT`, `CONFIG_NET_NS`, `CONFIG_VETH`, and `CONFIG_DEBUG_INFO_BTF`.
 
 OpenWrt owns Geo data through `v2ray-geosite` and `v2ray-geoip`. The package manager supplies `/usr/share/v2ray/geosite.dat` and `/usr/share/v2ray/geoip.dat` when Honk is installed. Honk does not download, bundle, modify, or pin these files during a build or at runtime.
 
@@ -121,7 +121,7 @@ bash tests/run-tests.sh
 git diff --check
 ~~~
 
-When no cached host tool is available, the check builds `honk-tool` from the locked archive with Rust `1.97.1` before exercising the LuCI contracts.
+When no cached host tool is available, the check builds `honk-tool` from the locked archive with Rust `1.97.1` before validating the LuCI configuration fixture. SDK and target checks compile the Ucode modules and RPCD service with the target Ucode runtime.
 
 ### GitHub Actions
 
@@ -154,7 +154,7 @@ The LuCI page is available at:
 /cgi-bin/luci/admin/services/honk
 ~~~
 
-The page is available at `/cgi-bin/luci/admin/services/honk`. The controller reads and preserves existing node, subscription, experimental, and unknown sections while rebuilding only its managed mode sections. Each apply validates, backs up, atomically writes, restarts Honk, checks health, and restores the previous configuration on failure.
+The page is available at `/cgi-bin/luci/admin/services/honk`. The `luci.honk` RPCD Ucode service reads and preserves existing node, subscription, experimental, comments, and unknown sections while rebuilding only its managed mode sections. Each apply validates, backs up, atomically writes, restarts Honk, checks health, and restores the previous configuration on failure.
 
 ## Quick Setup and Geo Assets
 
@@ -162,7 +162,7 @@ Quick Setup is the first Honk view. It uses the existing subscription and node d
 
 GeoSite and GeoIP are loaded directly from `/usr/share/v2ray`. The Diagnostics page reports their presence, package ownership, path, and size. Install or update `v2ray-geosite` and `v2ray-geoip` through the OpenWrt package manager to manage those files.
 
-Quick mutations are handled by `/usr/libexec/honk/quick-transaction-worker`. It keeps the previous bytes in a root-only sidecar, records each durable stage, and restores the prior running or stopped state after a failed restart, subscription wait, or probe. A failed recovery is reported as `degraded` and remains visible for operator action. Direct can be applied without a proxy subscription, while proxy presets require a non-empty, validated source group and the Geo/DNS/interface gates.
+Quick mutations are handled by `/usr/libexec/honk/quick-transaction-worker`. It keeps the previous bytes in a root-only sidecar, records each durable stage, and restores the prior running or stopped state after a failed restart, subscription wait, or probe. Source changes and runtime preparation use its `preserve` policy, so editing a stopped service does not start it. A failed recovery is reported as `degraded` and remains visible for operator action. Direct can be applied without a proxy subscription, while proxy presets require a non-empty, validated source group and the Geo/DNS/interface gates.
 
 ## Runtime Paths
 
@@ -174,6 +174,8 @@ Quick mutations are handled by `/usr/libexec/honk/quick-transaction-worker`. It 
 | UCI service settings | /etc/config/honk |
 | Init script | /etc/init.d/honk |
 | Runtime log | /tmp/honk/honk.log |
+| RPCD Ucode service | /usr/share/rpcd/ucode/luci.honk |
+| LuCI Ucode modules | /usr/share/ucode/luci/honk/ |
 | LuCI assets | /www/luci-static/resources/honk/app/ |
 
 Validate and start from a shell:
@@ -182,6 +184,8 @@ Validate and start from a shell:
 honk-tool validate --config /etc/honk/config.dae --json
 /etc/init.d/honk enable
 /etc/init.d/honk start
+ubus -v list luci.honk
+ubus call luci.honk state
 ~~~
 
 `config.dae.default` is the complete package-provided Honk baseline and is not a conffile. The user-owned
@@ -307,7 +311,7 @@ git diff --check
 cd luci-app-honk/ui && npm ci && npm run build
 ~~~
 
-The package checks verify source and patch digests, OpenWrt Geo package integration, shell/Lua syntax, RPC/menu manifests, generated assets, and the Quick Setup/transaction contracts used by the LuCI bridge.
+The package checks verify source and patch digests, OpenWrt Geo package integration, shell/Ucode syntax, RPC/menu manifests, generated assets, and the Quick Setup/transaction contracts used by the LuCI bridge.
 
 ## Upstream Documentation
 

@@ -2,31 +2,36 @@
 set -euo pipefail
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+package="$repo_root/luci-app-honk"
 tmp=$(mktemp -d)
 trap 'find "$tmp" -depth -delete' EXIT INT TERM
 
-manifest() {
-	local package=$1 output=$2
-	find "$repo_root/$package/luasrc" -type f -printf '%P\n' | sed -e 's#^#/usr/lib/lua/luci/#' >"$output.lua"
-	find "$repo_root/$package/root" -type f -printf '/%P\n' >"$output.root"
-	cat "$output.lua" "$output.root" | sort -u >"$output"
-}
+mapfile -t packages < <(find "$repo_root" -mindepth 1 -maxdepth 1 -type d -name 'luci-app-honk*' -printf '%f\n' | sort)
+test "${#packages[@]}" -eq 1
+test "${packages[0]}" = 'luci-app-honk'
 
-manifest luci-app-honk "$tmp/new"
-manifest luci-app-honk-legacy "$tmp/legacy"
-comm -12 "$tmp/new" "$tmp/legacy" >"$tmp/conflicts"
-test ! -s "$tmp/conflicts"
-
-grep -F 'admin/services/honk"' "$repo_root/luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json" >/dev/null
-grep -F 'admin/services/honk-legacy"' "$repo_root/luci-app-honk-legacy/root/usr/share/luci/menu.d/luci-app-honk-legacy.json" >/dev/null
-grep -F '/cgi-bin/luci/admin/services/honk/api' "$repo_root/luci-app-honk/ui/src/api.ts" >/dev/null
-grep -F '/cgi-bin/luci/admin/services/honk-legacy/api' "$repo_root/luci-app-honk-legacy/ui/src/api.ts" >/dev/null
-grep -F '/luci-static/resources/honk/app/' "$repo_root/luci-app-honk/luasrc/view/honk/dashboard.htm" >/dev/null
-grep -F '/luci-static/resources/honk-legacy/app/' "$repo_root/luci-app-honk-legacy/luasrc/view/honk_legacy/dashboard.htm" >/dev/null
-
-if rg -n 'honk_api|legacy|luci-app-honk-legacy' "$repo_root/luci-app-honk/luasrc" "$repo_root/luci-app-honk/ui/src" >/dev/null; then
-	echo "new implementation references the legacy implementation" >&2
+find "$package/ucode" -type f -printf '%P\n' | sed -e 's#^#/usr/share/ucode/luci/#' | sort >"$tmp/modules"
+find "$package/root" -type f -printf '/%P\n' | sort >"$tmp/root"
+sort -u "$tmp/modules" "$tmp/root" >"$tmp/manifest"
+if sort "$tmp/manifest" | uniq -d | grep -q .; then
+	echo 'new package contains duplicate install paths' >&2
 	exit 1
 fi
 
-printf 'luci-package-isolation conflicts=0 routes=isolated assets=isolated\n'
+grep -Fx '/usr/share/ucode/luci/honk/config.uc' "$tmp/manifest" >/dev/null
+grep -Fx '/usr/share/rpcd/ucode/luci.honk' "$tmp/manifest" >/dev/null
+grep -Fx '/usr/share/luci/menu.d/luci-app-honk.json' "$tmp/manifest" >/dev/null
+grep -Fx '/www/luci-static/resources/honk/app/index.html' "$tmp/manifest" >/dev/null
+grep -F 'admin/services/honk"' "$package/root/usr/share/luci/menu.d/luci-app-honk.json" >/dev/null
+grep -F '/luci-static/resources/honk/app/index.html' "$package/htdocs/luci-static/resources/view/honk/dashboard.js" >/dev/null
+
+if [ -e "$package/luasrc" ]; then
+	echo 'new package still ships Lua backend files' >&2
+	exit 1
+fi
+if rg -n '/cgi-bin/luci/admin/services/honk/api|honk[-_]legacy|luci-compat|luci-lua-runtime' "$package/Makefile" "$package/ucode" "$package/htdocs" "$package/ui/src" "$package/root" >/dev/null; then
+	echo 'removed package or legacy transport references remain' >&2
+	exit 1
+fi
+
+printf 'luci-package-isolation active=1 ucode=7 routes=native assets=isolated\n'

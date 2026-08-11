@@ -64,8 +64,8 @@ grep -F '"HONK_SUBSCRIPTION_CACHE_TTL=$SUBSCRIPTION_CACHE_TTL"' honk/files/honk.
 grep -F 'dnsmasq-integration' honk/Makefile >/dev/null
 grep -F 'server=127.0.0.1#1053' honk/files/dnsmasq-integration >/dev/null
 sh -n honk/files/dnsmasq-integration
-grep -F "ls -ln " luci-app-honk/luasrc/model/service.lua >/dev/null
-if grep -Fq 'stat -c %s' luci-app-honk/luasrc/model/service.lua; then
+grep -F "stat(" luci-app-honk/ucode/honk/service.uc >/dev/null
+if grep -Fq 'stat -c %s' luci-app-honk/ucode/honk/service.uc; then
 	echo 'runtime diagnostics must use BusyBox base commands' >&2
 	exit 1
 fi
@@ -98,8 +98,8 @@ grep -F 'cargo fetch --locked' .github/workflows/ci.yml >/dev/null
 grep -F 'cargo build --locked --manifest-path "$source_dir/Cargo.toml" -p honk-tool' .github/workflows/ci.yml >/dev/null
 grep -F 'ripgrep clang llvm libclang-dev pkg-config cmake' .github/workflows/ci.yml >/dev/null
 test ! -e locks/geo.lock.json
-if rg -n 'luci-app-honk-legacy' .github/scripts/build-packages-in-sdk.sh .github/workflows/build-packages.yml .github/workflows/ci.yml; then
-	echo 'legacy LuCI package must not be built by GitHub Actions' >&2
+if find .github -type f -exec grep -El 'honk[-_]legacy' {} + | grep -q .; then
+	echo 'removed LuCI package must not be referenced by GitHub Actions' >&2
 	exit 1
 fi
 test ! -e .github/workflows/build-honk-binaries.yml
@@ -123,50 +123,28 @@ if grep -Eq 'procd_set_param (stdout|stderr)' honk/files/honk.init; then
 	echo 'honk init must not forward core output to procd/logd' >&2
 	exit 1
 fi
-for lua_file in luci-app-honk/luasrc/controller/*.lua luci-app-honk/luasrc/model/*.lua; do luac -p "$lua_file"; done
-luac -p luci-app-honk-legacy/luasrc/controller/honk_legacy.lua
-luac -p luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua
+if [ -e luci-app-honk/luasrc ]; then
+	echo 'luci-app-honk must not ship a Lua backend' >&2
+	exit 1
+fi
 jq empty luci-app-honk/root/usr/share/rpcd/acl.d/luci-app-honk.json
 jq empty luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json
-jq empty luci-app-honk-legacy/root/usr/share/rpcd/acl.d/luci-app-honk-legacy.json
-jq empty luci-app-honk-legacy/root/usr/share/luci/menu.d/luci-app-honk-legacy.json
 grep -F '"path": "honk/dashboard"' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
-grep -F '"function": "api_preview"' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
-grep -F '"path": "honk_legacy/dashboard"' luci-app-honk-legacy/root/usr/share/luci/menu.d/luci-app-honk-legacy.json >/dev/null
-grep -F '"function": "api_dashboard_prepare"' luci-app-honk-legacy/root/usr/share/luci/menu.d/luci-app-honk-legacy.json >/dev/null
-
+grep -F '"type": "view"' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null
+if rg -n '"function"|/api/' luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json >/dev/null; then
+	echo 'luci-app-honk menu must not expose legacy API routes' >&2
+	exit 1
+fi
 grep -F 'option respawn' honk/files/honk.config >/dev/null
 grep -F '/etc/honk/config.dae' honk/files/honk.init >/dev/null
-grep -F 'tail -n 200 /tmp/honk/honk.log' luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua >/dev/null
-grep -F 'REVISION_CONFLICT' luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua >/dev/null
-grep -F 'ROLLBACK' luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua >/dev/null
-grep -F -- '--sample-ms 1000' luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua >/dev/null
-grep -F 'runtime_nodes' luci-app-honk-legacy/luasrc/controller/honk_legacy.lua >/dev/null
-grep -F '/usr/share/ucode/luci/dispatcher.uc' luci-app-honk-legacy/luasrc/controller/honk_legacy.lua >/dev/null
-grep -F 'function M.runtime_nodes' luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua >/dev/null
-grep -F 'function M.dashboard_prepare' luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua >/dev/null
-grep -F 'configuredNodeCount' luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua >/dev/null
-grep -F 'requestRules' luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua >/dev/null
-grep -F 'parse_dns_upstream' luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua >/dev/null
-grep -F 'template("honk/dashboard")' luci-app-honk/luasrc/controller/honk.lua >/dev/null
-grep -F 'floating-toolbar' luci-app-honk/luasrc/view/honk/dashboard.htm >/dev/null
+grep -F "honk-bridge-request" luci-app-honk/htdocs/luci-static/resources/view/honk/dashboard.js >/dev/null
+grep -F "object: 'luci.honk'" luci-app-honk/htdocs/luci-static/resources/view/honk/dashboard.js >/dev/null
 grep -F "external_controller: '0.0.0.0:9090'" honk/files/config.dae >/dev/null
 grep -F "external_ui: '/www/luci-static/resources/honk/app'" honk/files/config.dae >/dev/null
-grep -F 'local APP_DIR = "/www/luci-static/resources/honk-legacy/app"' luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua >/dev/null
 test -s luci-app-honk/root/www/luci-static/resources/honk/app/index.html
 find luci-app-honk/root/www/luci-static/resources/honk/app/assets -type f -size +1c | grep -q .
-test -s luci-app-honk-legacy/root/www/luci-static/resources/honk-legacy/app/index.html
-find luci-app-honk-legacy/root/www/luci-static/resources/honk-legacy/app/assets -type f -size +1c | grep -q .
 test ! -e luci-app-honk/root/usr/share/honk/zashboard
 test ! -e scripts/update-zashboard.sh
-grep -F "{ id: 'overview' as const" luci-app-honk-legacy/ui/src/App.vue >/dev/null
-grep -F "{ id: 'logs' as const" luci-app-honk-legacy/ui/src/App.vue >/dev/null
-grep -F "runtime.service('stop')" luci-app-honk-legacy/ui/src/App.vue >/dev/null
-grep -F "class ClashClient" luci-app-honk-legacy/ui/src/api.ts >/dev/null
-grep -F "client.stream<TrafficFrame>('/traffic'" luci-app-honk-legacy/ui/src/composables/useRuntime.ts >/dev/null
-grep -F 'dnsProtocols' luci-app-honk-legacy/ui/src/ConfigView.vue >/dev/null
-grep -F 'DnsTopology' luci-app-honk-legacy/ui/src/ConfigView.vue >/dev/null
-grep -F 'expectedRunning' luci-app-honk-legacy/ui/src/composables/useRuntime.ts >/dev/null
 grep -F "id: 'home' as const" luci-app-honk/ui/src/App.vue >/dev/null
 grep -F "id: 'diagnostics' as const" luci-app-honk/ui/src/App.vue >/dev/null
 if grep -Fq 'service-controls' luci-app-honk/ui/src/views/DiagnosticsView.vue; then
@@ -178,8 +156,8 @@ grep -F 'geoPackage' luci-app-honk/ui/src/i18n.ts >/dev/null
 grep -F 'geo-asset-grid' luci-app-honk/ui/src/views/DiagnosticsView.vue >/dev/null
 grep -F "id: 'logs' as const" luci-app-honk/ui/src/App.vue >/dev/null
 grep -F "china-proxy" luci-app-honk/ui/src/views/HomeView.vue >/dev/null
-grep -F "ADVANCED_TAKEOVER_REQUIRED" luci-app-honk/luasrc/model/service.lua >/dev/null
-grep -F "direct-dns" luci-app-honk/luasrc/model/dns.lua >/dev/null
+grep -F "ADVANCED_TAKEOVER_REQUIRED" luci-app-honk/ucode/honk/service.uc >/dev/null
+grep -F "direct-dns" luci-app-honk/ucode/honk/dns.uc >/dev/null
 
 # Behavioral contracts run from fresh disposable fixtures and keep their own
 # evidence directories when the caller supplies HONK_EVIDENCE_ROOT.

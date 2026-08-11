@@ -36,7 +36,6 @@ const runtime = useRuntimeMonitoring()
 const storedTheme = typeof window === 'undefined' ? null : window.localStorage.getItem('honk-theme')
 const followsSystemTheme = ref(storedTheme !== 'light' && storedTheme !== 'dark')
 const theme = ref<'light' | 'dark'>(storedTheme === 'dark' || (storedTheme !== 'light' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light')
-let refreshTimer: number | undefined
 let mediaQuery: MediaQueryList | undefined
 
 const navigation = computed(() => [
@@ -148,13 +147,11 @@ onMounted(() => {
   document.addEventListener('click', closePageActionMenu)
   window.addEventListener('hashchange', hashChanged)
   void refresh()
-  refreshTimer = window.setInterval(() => { void refresh() }, 5000)
 })
 onBeforeUnmount(() => {
   mediaQuery?.removeEventListener('change', handleSystemTheme)
   document.removeEventListener('click', closePageActionMenu)
   window.removeEventListener('hashchange', hashChanged)
-  if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
 })
 </script>
 

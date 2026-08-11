@@ -60,6 +60,20 @@ jq -e '.stage == "committed" and (.stageHistory | index("prepared")) != null and
 if grep -F 'candidate-config-bytes' "$state/quick-transaction.json" >/dev/null; then fail "raw candidate leaked into journal"; fi
 pass "happy atomic transaction and stage history"
 
+# Preserve is used by source updates and runtime preparation. A stopped
+# service must remain stopped while the validated configuration is committed.
+printf 'preserve-previous\n' >"$config"
+chmod 600 "$config"
+printf 'preserve-candidate\n' >"$candidate"
+chmod 600 "$candidate"
+expected=$(sha256sum "$config" | cut -d ' ' -f1)
+before_init_lines=$(wc -l <"$HONK_QUICK_INIT_LOG")
+HONK_QUICK_PREVIOUS_RUNNING=false "$repo_root/honk/files/quick-transaction-worker" --apply "$candidate" "$expected" nonce-preserve preserve >"$evidence/preserve.json"
+jq -e '.ok == true and .stage == "committed" and .action == "none"' "$evidence/preserve.json" >/dev/null || fail "preserve transaction result"
+[ "$(cat "$config")" = 'preserve-candidate' ] || fail "preserve candidate did not become config"
+[ "$(wc -l <"$HONK_QUICK_INIT_LOG")" -eq "$before_init_lines" ] || fail "preserve transaction started a stopped service"
+pass "preserve transaction keeps a stopped service stopped"
+
 printf 'previous-again\n' >"$config"
 chmod 600 "$config"
 expected=$(sha256sum "$config" | cut -d ' ' -f1)
@@ -112,14 +126,14 @@ jq -e '.recovered == true and .stage == "restored"' "$evidence/recovery.json" >/
 grep -Fx 'stop' "$HONK_QUICK_INIT_LOG" >/dev/null || fail "stopped state was not restored"
 pass "journal recovery restores and cleans sidecar"
 
-if rg -n 'M\.save\(entry\.candidate' "$repo_root/luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua" >/dev/null; then
-	fail "controller fallback writes config directly"
+grep -F "const WORKER = '/usr/libexec/honk/quick-transaction-worker';" "$repo_root/luci-app-honk/ucode/honk/service.uc" >/dev/null || fail "Ucode worker path missing"
+grep -F 'write_candidate' "$repo_root/luci-app-honk/ucode/honk/config.uc" >/dev/null || fail "Ucode candidate staging missing"
+if rg -n 'writefile\(config\.CONFIG|/etc/honk/config\.dae.*writefile' "$repo_root/luci-app-honk/ucode" >/dev/null; then
+	fail "Ucode service bypasses transaction worker"
 fi
-grep -F 'TRANSACTION_WORKER_UNAVAILABLE' "$repo_root/luci-app-honk-legacy/luasrc/model/honk_legacy_api.lua" >/dev/null || fail "worker ownership error missing"
-grep -F 'require_authenticated_session_acl_post_csrf' "$repo_root/luci-app-honk-legacy/luasrc/controller/honk_legacy.lua" >/dev/null || fail "authenticated ACL/CSRF guard missing"
 pass "single writer and mutation guard contract"
 
 jq -n --arg sha "$expected" \
-	'{schemaVersion:"honk.quick-transaction.v1",ok:true,stages:["prepared","candidate-written","service-transition","waiting-subscription","probing","committed"],sidecarSha256:$sha,rawCandidateInJournal:false,assertions:14}' \
+	'{schemaVersion:"honk.quick-transaction.v1",ok:true,stages:["prepared","candidate-written","service-transition","waiting-subscription","probing","committed"],sidecarSha256:$sha,rawCandidateInJournal:false,preserveKeepsStopped:true,assertions:15}' \
 	>"$evidence/transaction-contract.json"
 printf 'quick-transaction assertions=%s\n' "$assertions"

@@ -91,10 +91,11 @@ recover() {
 }
 
 apply_candidate() {
-	local candidate=$1 expected=$2 nonce=$3 tmp
+	local candidate=$1 expected=$2 nonce=$3 policy=${4:-start} tmp
 	mkdir -p "$STATE_DIR"
 	exec 9>"$LOCK"
 	flock -n 9 || { json_error TRANSACTION_BUSY "another Quick Setup transaction is active"; return 1; }
+	case "$policy" in start|preserve) ;; *) json_error INVALID_REQUEST "unknown service policy"; return 64 ;; esac
 	safe_file "$candidate" || { json_error CANDIDATE_OWNERSHIP "candidate must be root-owned mode 600"; return 1; }
 	[ "$(hash_file "$CONFIG")" = "$expected" ] || { json_error REVISION_CONFLICT "configuration changed"; return 1; }
 	"$HONK_TOOL" validate --config "$candidate" --json >/dev/null 2>&1 || { json_error INVALID_CONFIG "candidate failed validation"; return 1; }
@@ -106,6 +107,12 @@ apply_candidate() {
 	tmp="$CONFIG.candidate.$$"; cp "$candidate" "$tmp"; chmod 600 "$tmp"; mv -f "$tmp" "$CONFIG"
 	sync_parent "$CONFIG"
 	write_journal service-transition
+	if [ "$policy" = preserve ] && [ "$previous_running" = false ]; then
+		write_journal committed
+		rm -f "$SIDECAR"
+		printf '{"ok":true,"stage":"committed","nonce":"%s","configSha256":"%s","action":"none"}\n' "$nonce" "$(hash_file "$CONFIG")"
+		return 0
+	fi
 	if ! start_candidate "$previous_running"; then
 		write_journal rollback-in-progress
 		cp "$SIDECAR" "$CONFIG"; chmod 600 "$CONFIG"; sync_parent "$CONFIG"
@@ -140,11 +147,11 @@ apply_candidate() {
 	fi
 	write_journal committed
 	rm -f "$SIDECAR"
-	printf '{"ok":true,"stage":"committed","nonce":"%s","configSha256":"%s"}\n' "$nonce" "$(hash_file "$CONFIG")"
+	printf '{"ok":true,"stage":"committed","nonce":"%s","configSha256":"%s","action":"%s"}\n' "$nonce" "$(hash_file "$CONFIG")" "$( [ "$previous_running" = true ] && printf restart || printf start )"
 }
 
 case "${1:-}" in
 	--recover) recover ;;
-	--apply) [ "$#" -eq 4 ] || { json_error INVALID_REQUEST "usage: --apply CANDIDATE EXPECTED_REVISION NONCE"; exit 64; }; apply_candidate "$2" "$3" "$4" ;;
+	--apply) [ "$#" -ge 4 ] && [ "$#" -le 5 ] || { json_error INVALID_REQUEST "usage: --apply CANDIDATE EXPECTED_REVISION NONCE [start|preserve]"; exit 64; }; apply_candidate "$2" "$3" "$4" "${5:-start}" ;;
 	*) json_error INVALID_REQUEST "unknown worker command"; exit 64 ;;
 esac
