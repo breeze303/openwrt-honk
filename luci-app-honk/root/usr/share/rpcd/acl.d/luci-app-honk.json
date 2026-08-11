@@ -12,6 +12,7 @@
 				"/usr/share/v2ray/**"
 			],
 			"ubus": {
+				"luci.honk": [ "state", "advanced", "default_config", "diagnostics", "logs", "network_interfaces", "runtime_dashboard" ],
 				"service": [ "list" ],
 				"system": [ "board", "info" ],
 				"network.interface": [ "dump" ],
@@ -25,9 +26,13 @@
 			"/etc/honk/config.dae.last-good",
 			"/tmp/honk/honk.log",
 				"/run/honk/luci-*.json",
+				"/run/honk/luci-*.dae",
 				"/run/honk/luci-*.lock"
 			],
-			"ubus": { "service": [ "list" ] }
+			"ubus": {
+				"luci.honk": [ "preview", "apply", "service", "sources", "validate_advanced", "apply_advanced", "refresh_subscription", "subscription_cache", "delete_subscription_cache", "delay", "connectivity", "clear_logs", "toggle_clash_api", "reset_config", "apply_interfaces", "runtime_prepare" ],
+				"service": [ "list" ]
+			}
 		}
 	}
 }

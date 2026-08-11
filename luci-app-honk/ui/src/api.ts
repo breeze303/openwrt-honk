@@ -7,7 +7,8 @@ export type DefaultConfigResponse = {
   templateRevision: string
 }
 
-const base = '/cgi-bin/luci/admin/services/honk/api'
+const PROTOCOL_VERSION = 1
+const REQUEST_TIMEOUT = 30000
 
 export class ApiRequestError extends Error {
   constructor(message: string, readonly code: string, readonly data: Record<string, unknown>) {
@@ -57,47 +58,90 @@ function normalizeState(value: StateResponse): StateResponse {
   }
 }
 
-function csrfToken(): string {
-  const local = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-  if (local || window.parent === window) return local
-  try {
-    return window.parent.document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-  } catch {
-    return ''
+type ApiResponse = Record<string, unknown> & { ok?: boolean; error?: { code?: string; message?: string } }
+type BridgeMessage = {
+  type?: string
+  version?: number
+  requestId?: string
+  result?: ApiResponse
+  error?: { code?: string; message?: string }
+}
+
+class BridgeClient {
+  private readonly origin = window.location.origin
+  private readonly pending = new Map<string, { resolve: (value: ApiResponse) => void; reject: (reason: Error) => void; timer: number }>()
+  private readyPromise: Promise<void>
+  private sequence = 0
+
+  constructor() {
+    this.readyPromise = new Promise((resolve, reject) => {
+      if (window.parent === window) {
+        reject(new ApiRequestError('Honk must be opened from LuCI.', 'BRIDGE_UNAVAILABLE', {}))
+        return
+      }
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener('message', onReady)
+        reject(new ApiRequestError('LuCI bridge did not become ready.', 'BRIDGE_TIMEOUT', {}))
+      }, 10000)
+      const onReady = (event: MessageEvent<BridgeMessage>) => {
+        if (event.origin !== this.origin || event.source !== window.parent) return
+        if (event.data?.type !== 'honk-bridge-ready' || event.data.version !== PROTOCOL_VERSION) return
+        window.clearTimeout(timeout)
+        window.removeEventListener('message', onReady)
+        resolve()
+      }
+      window.addEventListener('message', onReady)
+      window.parent.postMessage({ type: 'honk-bridge-handshake', version: PROTOCOL_VERSION }, this.origin)
+    })
+    window.addEventListener('message', event => this.receive(event as MessageEvent<BridgeMessage>))
+  }
+
+  private receive(event: MessageEvent<BridgeMessage>) {
+    if (event.origin !== this.origin || event.source !== window.parent) return
+    const data = event.data
+    if (data?.type !== 'honk-bridge-response' || typeof data.requestId !== 'string') return
+    const pending = this.pending.get(data.requestId)
+    if (!pending) return
+    this.pending.delete(data.requestId)
+    window.clearTimeout(pending.timer)
+    if (data.error) {
+      pending.reject(new ApiRequestError(data.error.message || 'Bridge request failed.', data.error.code || 'REQUEST_FAILED', {}))
+      return
+    }
+    if (!data.result || typeof data.result !== 'object') {
+      pending.reject(new ApiRequestError('Invalid bridge response.', 'INVALID_RESPONSE', {}))
+      return
+    }
+    pending.resolve(data.result)
+  }
+
+  private requestId() {
+    this.sequence += 1
+    const bytes = new Uint32Array(1)
+    window.crypto.getRandomValues(bytes)
+    return `honk_${Date.now().toString(36)}_${this.sequence.toString(36)}_${bytes[0].toString(36)}`
+  }
+
+  async request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    await this.readyPromise
+    const requestId = this.requestId()
+    const response = await new Promise<ApiResponse>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        this.pending.delete(requestId)
+        reject(new ApiRequestError('Bridge request timed out.', 'REQUEST_TIMEOUT', {}))
+      }, REQUEST_TIMEOUT)
+      this.pending.set(requestId, { resolve, reject, timer })
+      window.parent.postMessage({ type: 'honk-bridge-request', version: PROTOCOL_VERSION, requestId, method, params }, this.origin)
+    })
+    if (response.ok === false) {
+      throw new ApiRequestError(response.error?.message || 'Request failed.', response.error?.code || 'REQUEST_FAILED', response)
+    }
+    return response as T
   }
 }
 
-async function request<T>(path: string, payload?: unknown): Promise<T> {
-  const token = csrfToken()
-  const endpoint = `${base}/${path}`
-  const requestUrl = payload === undefined || !token ? endpoint : `${endpoint}?token=${encodeURIComponent(token)}`
-  const response = await fetch(requestUrl, {
-    method: payload === undefined ? 'GET' : 'POST',
-    credentials: 'same-origin',
-    cache: 'no-store',
-    headers: payload === undefined ? { Accept: 'application/json' } : {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...(token ? { 'X-CSRF-Token': token } : {}),
-    },
-    body: payload === undefined ? undefined : JSON.stringify(payload),
-  })
-  const contentType = response.headers.get('content-type') || ''
-  type ApiResponse = Record<string, unknown> & { ok?: boolean; error?: { code?: string; message?: string } }
-  const fallback: ApiResponse = { ok: false, error: { code: `HTTP_${response.status}`, message: `HTTP ${response.status}` } }
-  let data: ApiResponse = fallback
-  if (contentType.includes('json')) {
-    try {
-      data = await response.json() as ApiResponse
-    } catch {
-      data = { ok: false, error: { code: 'INVALID_RESPONSE', message: `HTTP ${response.status}` } }
-    }
-  }
-  if (!response.ok || data.ok === false) {
-    throw new ApiRequestError(data.error?.message || `HTTP ${response.status}`, data.error?.code || 'REQUEST_FAILED', data)
-  }
-  return data as T
-}
+const bridge = new BridgeClient()
+const request = <T>(method: string, params: Record<string, unknown> = {}) => bridge.request<T>(method, params)
 
 export const api = {
   state: () => request<StateResponse>('state').then(normalizeState),

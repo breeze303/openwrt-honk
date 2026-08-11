@@ -1,0 +1,219 @@
+#!/usr/bin/env ucode
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+
+import * as config from 'luci.honk.config';
+import * as node from 'luci.honk.node';
+import * as service from 'luci.honk.service';
+
+const MAX_NAME = 64;
+const MAX_URL = 4096;
+const MAX_CONFIG = 1024 * 1024;
+const MODES = { 'china-direct': true, gfwlist: true, 'china-proxy': true, global: true };
+const LOG_LEVELS = { trace: true, debug: true, info: true, warn: true, error: true };
+const DIAL_MODES = { ip: true, domain: true, 'domain+': true, 'domain++': true };
+
+function invalid(code, message) {
+	return config.result_error(code || 'INVALID_REQUEST', message || 'invalid request');
+}
+
+function valid_name(value) {
+	return type(value) === 'string' && length(value) > 0 && length(value) <= MAX_NAME && match(value, /^[A-Za-z0-9_.-]+$/);
+}
+
+function valid_revision(value) {
+	return type(value) === 'string' && match(value, /^[A-Fa-f0-9]{64}$/);
+}
+
+function as_array(value, limit) {
+	return type(value) === 'array' && length(value) <= limit ? value : null;
+}
+
+function is_bool(value) {
+	return type(value) === 'bool';
+}
+
+function is_integer(value) {
+	return type(value) === 'int';
+}
+
+function mode_input(args) {
+	args = args || {};
+	if (!MODES[args.mode]) return [null, invalid('MODE_UNKNOWN')];
+	if (!valid_revision(args.expectedRevision)) return [null, invalid('REVISION_REQUIRED')];
+	const node_names = as_array(args.nodeNames, 32);
+	const subscription_names = as_array(args.subscriptionNames, 32);
+	const rules = as_array(args.deviceRules, 64);
+	if (!node_names || !subscription_names || !rules || length(node_names) + length(subscription_names) > 32) return [null, invalid('PROXY_SOURCE_INVALID')];
+	for (let name in node_names) if (!node.valid_runtime_node_name(name)) return [null, invalid('NODE_MISSING')];
+	for (let name in subscription_names) if (!valid_name(name)) return [null, invalid('SUBSCRIPTION_REFRESH_FAILED')];
+	for (let rule in rules) {
+		if (type(rule) !== 'object' || !(rule.kind in { ip: true, mac: true }) || !(rule.outbound in { direct: true, proxy: true }) || type(rule.value) !== 'string' || length(rule.value) > 128)
+			return [null, invalid('DEVICE_RULE_INVALID')];
+	}
+	for (let key in [ 'directDns', 'proxyDns' ])
+		if (args[key] != null && (type(args[key]) !== 'string' || length(args[key]) > 512)) return [null, invalid('CONFIG_INVALID')];
+	if (args.takeover != null && !is_bool(args.takeover)) return [null, invalid('INVALID_REQUEST')];
+	return [{
+		mode: args.mode,
+		nodeNames: node_names,
+		subscriptionNames: subscription_names,
+		deviceRules: rules,
+		expectedRevision: args.expectedRevision,
+		takeover: args.takeover === true,
+		directDns: args.directDns,
+		proxyDns: args.proxyDns,
+	}, null];
+}
+
+function source_input(args) {
+	args = args || {};
+	if (!valid_revision(args.expectedRevision) || type(args.action) !== 'string' || !valid_name(args.name)) return [null, invalid('SOURCE_ACTION_INVALID')];
+	const allowed = { 'add-node': true, 'remove-node': true, 'add-subscription': true, 'remove-subscription': true };
+	if (!allowed[args.action]) return [null, invalid('SOURCE_ACTION_INVALID')];
+	if (args.action === 'add-node' || args.action === 'add-subscription') {
+		if (type(args.url) !== 'string' || length(args.url) < 1 || length(args.url) > MAX_URL) return [null, invalid('SOURCE_ACTION_INVALID')];
+	}
+	if (args.updateInterval != null && (!is_integer(args.updateInterval) || args.updateInterval < 0 || args.updateInterval > 604800)) return [null, invalid('SOURCE_ACTION_INVALID')];
+	return [{ action: args.action, name: args.name, url: args.url, updateInterval: args.updateInterval, expectedRevision: args.expectedRevision }, null];
+}
+
+function advanced_input(args) {
+	args = args || {};
+	if (type(args.config) !== 'string' || length(args.config) > MAX_CONFIG) return [null, invalid('CONFIG_INVALID')];
+	if (args.expectedRevision != null && !valid_revision(args.expectedRevision)) return [null, invalid('REVISION_REQUIRED')];
+	return [{ config: args.config, expectedRevision: args.expectedRevision }, null];
+}
+
+function interface_input(args) {
+	args = args || {};
+	if (!valid_revision(args.expectedRevision)) return [null, invalid('REVISION_REQUIRED')];
+	for (let key in [ 'lanDevice', 'wanDevice', 'lan', 'wan' ])
+		if (args[key] != null && (type(args[key]) !== 'string' || length(args[key]) > MAX_NAME || !match(args[key], /^[A-Za-z0-9_.-]+$/))) return [null, invalid('INTERFACE_NOT_AVAILABLE')];
+	if (args.dialMode != null && !DIAL_MODES[args.dialMode]) return [null, invalid('DIAL_MODE_INVALID')];
+	if (args.logLevel != null && (!LOG_LEVELS[args.logLevel] || type(args.logLevel) !== 'string')) return [null, invalid('LOG_LEVEL_INVALID')];
+	for (let key in [ 'dnsmasqForwarding', 'proxyLocalDns' ])
+		if (args[key] != null && !is_bool(args[key])) return [null, invalid('LOCAL_DNS_INVALID')];
+	return [{
+		lanDevice: args.lanDevice,
+		wanDevice: args.wanDevice,
+		lan: args.lan,
+		wan: args.wan,
+		dialMode: args.dialMode,
+		logLevel: args.logLevel,
+		dnsmasqForwarding: args.dnsmasqForwarding,
+		proxyLocalDns: args.proxyLocalDns,
+		expectedRevision: args.expectedRevision,
+	}, null];
+}
+
+const methods = {
+	state: {
+		call: () => service.state(false),
+	},
+	advanced: {
+		call: () => service.advanced(),
+	},
+	default_config: {
+		call: () => service.default_config(),
+	},
+	diagnostics: {
+		call: () => service.diagnostics(),
+	},
+	logs: {
+		call: () => service.logs(),
+	},
+	network_interfaces: {
+		call: () => service.network_interfaces(),
+	},
+	runtime_dashboard: {
+		call: () => service.runtime_dashboard(),
+	},
+	preview: {
+		args: { mode: '', nodeNames: [], subscriptionNames: [], deviceRules: [], expectedRevision: '', takeover: false, directDns: '', proxyDns: '' },
+		call: req => {
+			const input = mode_input(req.args);
+			return input[0] ? service.preview(input[0]) : input[1];
+		},
+	},
+	apply: {
+		args: { mode: '', nodeNames: [], subscriptionNames: [], deviceRules: [], expectedRevision: '', takeover: false, directDns: '', proxyDns: '' },
+		call: req => {
+			const input = mode_input(req.args);
+			return input[0] ? service.apply(input[0]) : input[1];
+		},
+	},
+	service: {
+		args: { action: '' },
+		call: req => (type(req.args?.action) === 'string' && req.args.action in { start: true, stop: true, restart: true }) ? service.service(req.args.action) : invalid('SOURCE_ACTION_INVALID'),
+	},
+	sources: {
+		args: { action: '', name: '', url: '', updateInterval: 0, expectedRevision: '' },
+		call: req => {
+			const input = source_input(req.args);
+			return input[0] ? service.sources(input[0]) : input[1];
+		},
+	},
+	validate_advanced: {
+		args: { config: '' },
+		call: req => {
+			const input = advanced_input(req.args);
+			return input[0] ? service.validate_advanced(input[0].config) : input[1];
+		},
+	},
+	apply_advanced: {
+		args: { config: '', expectedRevision: '' },
+		call: req => {
+			const input = advanced_input(req.args);
+			return input[0] && valid_revision(input[0].expectedRevision) ? service.apply_advanced(input[0]) : invalid('REVISION_REQUIRED');
+		},
+	},
+	refresh_subscription: {
+		args: { name: '' },
+		call: req => valid_name(req.args?.name) ? service.refresh_subscription({ name: req.args.name }) : invalid('SUBSCRIPTION_REFRESH_FAILED'),
+	},
+	subscription_cache: {
+		args: { name: '' },
+		call: req => valid_name(req.args?.name) ? service.subscription_cache({ name: req.args.name }) : invalid('SUBSCRIPTION_REFRESH_FAILED'),
+	},
+	delete_subscription_cache: {
+		args: { name: '' },
+		call: req => valid_name(req.args?.name) ? service.delete_subscription_cache({ name: req.args.name }) : invalid('SUBSCRIPTION_REFRESH_FAILED'),
+	},
+	delay: {
+		args: { name: '' },
+		call: req => node.valid_runtime_node_name(req.args?.name) ? service.delay({ name: req.args.name }) : invalid('NODE_MISSING'),
+	},
+	connectivity: {
+		args: { id: '' },
+		call: req => (type(req.args?.id) === 'string' && req.args.id in { aliyun: true, google: true, github: true, youtube: true }) ? service.connectivity({ id: req.args.id }) : invalid('CONNECTIVITY_TARGET_INVALID'),
+	},
+	clear_logs: {
+		call: () => service.clear_logs(),
+	},
+	toggle_clash_api: {
+		args: { enabled: false, expectedRevision: '' },
+		call: req => {
+			if (!is_bool(req.args?.enabled)) return invalid('CLASH_API_INVALID');
+			if (!valid_revision(req.args?.expectedRevision)) return invalid('REVISION_REQUIRED');
+			return service.toggle_clash_api({ enabled: req.args.enabled, expectedRevision: req.args.expectedRevision });
+		},
+	},
+	reset_config: {
+		args: { expectedRevision: '' },
+		call: req => valid_revision(req.args?.expectedRevision) ? service.reset_config({ expectedRevision: req.args.expectedRevision }) : invalid('REVISION_REQUIRED'),
+	},
+	apply_interfaces: {
+		args: { lanDevice: '', wanDevice: '', lan: '', wan: '', dialMode: '', logLevel: '', dnsmasqForwarding: false, proxyLocalDns: false, expectedRevision: '' },
+		call: req => {
+			const input = interface_input(req.args);
+			return input[0] ? service.apply_interfaces(input[0]) : input[1];
+		},
+	},
+	runtime_prepare: {
+		args: { expectedRevision: '' },
+		call: req => valid_revision(req.args?.expectedRevision) ? service.runtime_prepare({ expectedRevision: req.args.expectedRevision }) : invalid('REVISION_REQUIRED'),
+	},
+};
+
+return { 'luci.honk': methods };
