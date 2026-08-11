@@ -58,6 +58,7 @@ local function raw_fetch(url, target)
 	local command = table.concat({
 		"/usr/bin/curl -fsSL --max-filesize 1048576",
 		"--connect-timeout 10 --max-time 30",
+		"--user-agent", config.shell_quote("Honk/0.0.1"),
 		"-o", config.shell_quote(target),
 		config.shell_quote(url),
 		"2>/dev/null",

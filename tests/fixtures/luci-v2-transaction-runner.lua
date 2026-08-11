@@ -66,10 +66,17 @@ package.preload["luci.model.uci"] = function()
 end
 
 local alive, init_calls = arg[4] ~= "subscription-stopped" and arg[4] ~= "runtime-stopped", 0
+local fetch_command
 package.preload["luci.sys"] = function()
 	return {
 		call = function(command)
 			if command:find("pidof honk-core", 1, true) then return alive and 0 or 1 end
+			if command:find("/usr/bin/curl", 1, true) then
+				fetch_command = command
+				local target = command:match("%-o%s+'([^']+)'")
+				if target then write(target, "fixture subscription body") end
+				return target and 0 or 1
+			end
 			local action = command:match("%s(restart)%s") or command:match("%s(start)%s") or command:match("%s(stop)%s")
 			if action then
 				init_calls = init_calls + 1
@@ -187,14 +194,12 @@ elseif arg[4] == "runtime-running" or arg[4] == "runtime-stopped" then
 	assert(init_calls == (arg[4] == "runtime-running" and 1 or 0), "ready runtime preparation changed service state")
 	print("runtime-monitoring=" .. (arg[4] == "runtime-running" and "restarted" or "stayed-stopped"))
 elseif arg[4] == "subscription-stopped" then
-	local offline = previous:gsub("https://subscriber%.invalid/list%?token=REDACTED", "socks5://127.0.0.2:1080#offline-node")
-	assert(offline ~= previous, "offline subscription fixture was not prepared")
-	write(arg[2], offline)
 	local result, status = service.refresh_subscription({ name = "fixture-sub" })
 	assert(result and result.ok and not status, "stopped service subscription refresh failed")
 	assert(result.cache and result.cache.nodeCount == 1, "stopped service did not persist subscription nodes")
 	assert(result.runtimeRefresh == false, "stopped service unexpectedly used the runtime API")
 	assert(not alive and init_calls == 0, "stopped service subscription refresh changed service state")
+	assert(fetch_command and fetch_command:find("--user-agent 'Honk/0.0.1'", 1, true), "subscription fetch omitted the Honk user agent")
 	print("subscription-refresh=offline-cache")
 else
 	local result, status = service.apply_content(candidate, "deadbeef", { fixture = "conflict" })

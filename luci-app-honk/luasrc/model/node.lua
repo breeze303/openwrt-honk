@@ -21,14 +21,22 @@ local function protocol(value)
 	return tostring(value or ""):match("^([%w+.-]+)://")
 end
 
-local function nested_sections(body)
-	local parsed = config.parse(body)
-	return parsed and parsed.sections or {}
+local function subscription_parts(body)
+	local sections = config.nested_sections(body)
+	if not sections then return nil, "" end
+	local flat = body
+	for index = #sections, 1, -1 do
+		local section = sections[index]
+		flat = flat:sub(1, section.start - 1) .. flat:sub(section.finish + 1)
+	end
+	return sections, flat
 end
 
 local function subscription_catalog(body)
 	local result, nested_by_name = {}, {}
-	for _, section in ipairs(nested_sections(body)) do
+	local sections, flat = subscription_parts(body)
+	if not sections then return result end
+	for _, section in ipairs(sections) do
 		local values = config.key_values(config.section_body(body, section))
 		if values.url and values.url ~= "" then
 			nested_by_name[section.name] = true
@@ -40,12 +48,6 @@ local function subscription_catalog(body)
 				updateInterval = tonumber(values.update_interval) or 86400,
 			}
 		end
-	end
-	local flat = body
-	local sections = nested_sections(body)
-	for index = #sections, 1, -1 do
-		local section = sections[index]
-		flat = flat:sub(1, section.start - 1) .. flat:sub(section.finish + 1)
 	end
 	for _, entry in ipairs(config.named_entries(flat)) do
 		if not nested_by_name[entry.name] then
@@ -81,17 +83,13 @@ function M.subscription_url(content, name)
 	local subscription_section = config.section(content, "subscription")
 	if not subscription_section then return nil end
 	local body = config.section_body(content, subscription_section)
-	local sections = nested_sections(body)
+	local sections, flat = subscription_parts(body)
+	if not sections then return nil end
 	for _, section in ipairs(sections) do
 		if section.name == name then
 			local url = config.key_values(config.section_body(body, section)).url
 			if type(url) == "string" and url ~= "" then return url end
 		end
-	end
-	local flat = body
-	for index = #sections, 1, -1 do
-		local section = sections[index]
-		flat = flat:sub(1, section.start - 1) .. flat:sub(section.finish + 1)
 	end
 	for _, entry in ipairs(config.named_entries(flat)) do
 		if entry.name == name and type(entry.value) == "string" and entry.value ~= "" then return entry.value end
@@ -317,11 +315,18 @@ local function append_body(body, value)
 	return clean .. "\n" .. value .. "\n"
 end
 
-local function remove_flat_line(body, name)
-	local output, removed = {}, false
+local function remove_flat_line(body, name, sections)
+	local output, removed, offset, section_index = {}, false, 1, 1
 	for line in (tostring(body or "") .. "\n"):gmatch("([^\n]*)\n") do
+		local section = sections and sections[section_index]
+		while section and offset > section.finish do
+			section_index = section_index + 1
+			section = sections[section_index]
+		end
+		local nested = section and offset >= section.start and offset <= section.finish
 		local key = line:match("^%s*([%w_.-]+)%s*:")
-		if key == name then removed = true else output[#output + 1] = line end
+		if not nested and key == name then removed = true else output[#output + 1] = line end
+		offset = offset + #line + 1
 	end
 	return table.concat(output, "\n"), removed
 end
@@ -364,18 +369,19 @@ local function mutate_subscription(content, action, input)
 		}, "\n")
 		body = append_body(body, block)
 	elseif action == "remove-subscription" then
-		local parsed = config.parse(body)
+		local sections = config.nested_sections(body)
+		if not sections then return nil, "SUBSCRIPTION_MISSING" end
 		local removed = false
-		if parsed then
-			for index = #parsed.sections, 1, -1 do
-				local nested = parsed.sections[index]
-				if nested.name == input.name then
-					body = body:sub(1, nested.start - 1) .. body:sub(nested.finish + 1)
-					removed = true
-				end
+		for index = #sections, 1, -1 do
+			local nested = sections[index]
+			if nested.name == input.name then
+				body = body:sub(1, nested.start - 1) .. body:sub(nested.finish + 1)
+				removed = true
 			end
 		end
-		local next_body, flat_removed = remove_flat_line(body, input.name)
+		local remaining = config.nested_sections(body)
+		if not remaining then return nil, "SUBSCRIPTION_MISSING" end
+		local next_body, flat_removed = remove_flat_line(body, input.name, remaining)
 		body, removed = next_body, removed or flat_removed
 		if not removed then return nil, "SUBSCRIPTION_MISSING" end
 	else

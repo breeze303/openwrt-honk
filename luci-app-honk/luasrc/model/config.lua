@@ -105,6 +105,37 @@ function M.parse(content)
 	return { content = content, sections = sections, byName = by_name }, nil
 end
 
+-- Extract immediate child sections while leaving flat entries alone. Unlike
+-- parse(), child names follow the user-facing source-name grammar and may
+-- start with a digit or contain dots.
+function M.nested_sections(content)
+	if type(content) ~= "string" then return nil, "configuration must be text" end
+	local sections, index, length = {}, 1, #content
+	while index <= length do
+		local char = content:sub(index, index)
+		if char:match("%s") then
+			index = index + 1
+		elseif char == "#" then
+			local newline = content:find("\n", index, true)
+			index = newline and newline + 1 or length + 1
+		else
+			local name = content:sub(index):match("^([%w_.-]+)")
+			local open = name and index + #name or index
+			while name and open <= length and content:sub(open, open):match("%s") do open = open + 1 end
+			if name and content:sub(open, open) == "{" then
+				local close = section_close(content, open)
+				if not close then return nil, "section " .. name .. " is missing a closing brace" end
+				sections[#sections + 1] = { name = name, start = index, open = open, close = close, finish = close }
+				index = close + 1
+			else
+				local newline = content:find("\n", index, true)
+				index = newline and newline + 1 or length + 1
+			end
+		end
+	end
+	return sections, nil
+end
+
 function M.section(content, name)
 	local parsed, err = M.parse(content)
 	if not parsed then return nil, err end
