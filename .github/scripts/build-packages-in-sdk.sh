@@ -146,7 +146,6 @@ prepare_rust_feed
 
 ./scripts/feeds install -p "$feed_name" -f honk
 ./scripts/feeds install -p "$feed_name" -f luci-app-honk
-./scripts/feeds install -p "$feed_name" -f luci-app-honk-legacy
 if "$cache_enabled"; then
 	cat >>.config <<EOF
 CONFIG_RUST_SCCACHE=y
@@ -157,8 +156,7 @@ make defconfig
 make "package/honk/download" V=s
 make -j"$(nproc)" CONFIG_AUTOREMOVE=y BPF_RUST_TOOLCHAIN="$bpf_toolchain" \
 	"package/honk/compile" \
-	"package/luci-app-honk/compile" \
-	"package/luci-app-honk-legacy/compile" V=s
+	"package/luci-app-honk/compile" V=s
 
 if "$cache_enabled"; then
 	sccache --show-stats || true

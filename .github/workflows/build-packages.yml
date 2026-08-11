@@ -11,7 +11,6 @@ on:
       - honk/**
       - locks/**
       - luci-app-honk/**
-      - luci-app-honk-legacy/**
   pull_request:
     branches:
       - main
@@ -21,7 +20,6 @@ on:
       - honk/**
       - locks/**
       - luci-app-honk/**
-      - luci-app-honk-legacy/**
 
 permissions:
   contents: read
@@ -80,6 +78,9 @@ jobs:
             sdk: openwrt-25.12
             package_ext: apk
           - arch: aarch64_generic
+            sdk: openwrt-25.12
+            package_ext: apk
+          - arch: aarch64_cortex-a53
             sdk: openwrt-25.12
             package_ext: apk
 
@@ -199,8 +200,8 @@ jobs:
             "$package_dir"/honk[-_]*."$PACKAGE_EXT"
             "$package_dir"/luci-app-honk[-_]*."$PACKAGE_EXT"
           )
-          if [ "${#packages[@]}" -ne 3 ]; then
-            echo "Expected honk, luci-app-honk, and luci-app-honk-legacy packages in $package_dir" >&2
+          if [ "${#packages[@]}" -ne 2 ]; then
+            echo "Expected honk and luci-app-honk packages in $package_dir" >&2
             find .build-output/bin/packages -type f -print || true
             exit 1
           fi

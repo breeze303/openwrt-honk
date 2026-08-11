@@ -67,5 +67,11 @@
 	},
 	"admin/services/honk/api/apply_interfaces": {
 		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_apply_interfaces" }
+	},
+	"admin/services/honk/api/runtime_dashboard": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_runtime_dashboard" }
+	},
+	"admin/services/honk/api/runtime_prepare": {
+		"action": { "type": "call", "module": "luci.controller.honk", "function": "api_runtime_prepare" }
 	}
 }

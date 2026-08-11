@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Activity, FileCode2, Gauge, Home, Languages, Menu, Moon, Network, Power, RefreshCw, RotateCcw, Save, ScrollText, Server, Sun, X } from '@lucide/vue'
+import { Activity, Cable, ChartNoAxesCombined, FileCode2, Gauge, Home, Languages, Menu, Moon, Network, Power, RefreshCw, RotateCcw, Save, ScrollText, Server, Sun, X } from '@lucide/vue'
 import { api } from './api'
+import { useRuntimeMonitoring } from './composables/useRuntimeMonitoring'
 import { locale, t } from './i18n'
 import type { PageAction } from './page-actions'
 import type { StateResponse } from './types'
 import AdvancedView from './views/AdvancedView.vue'
+import ConnectionsView from './views/ConnectionsView.vue'
 import DevicesView from './views/DevicesView.vue'
 import DiagnosticsView from './views/DiagnosticsView.vue'
 import HomeView from './views/HomeView.vue'
 import LogsView from './views/LogsView.vue'
 import NodesView from './views/NodesView.vue'
+import TrafficView from './views/TrafficView.vue'
 
-type ViewName = 'home' | 'nodes' | 'devices' | 'advanced' | 'diagnostics' | 'logs'
-const validViews: ViewName[] = ['home', 'nodes', 'devices', 'advanced', 'diagnostics', 'logs']
+type ViewName = 'home' | 'traffic' | 'connections' | 'nodes' | 'devices' | 'advanced' | 'diagnostics' | 'logs'
+const validViews: ViewName[] = ['home', 'traffic', 'connections', 'nodes', 'devices', 'advanced', 'diagnostics', 'logs']
 function viewFromHash(): ViewName {
   const view = window.location.hash.replace(/^#\/?/, '').split('/')[0] as ViewName
   return validViews.includes(view) ? view : 'home'
@@ -29,6 +32,7 @@ const notice = ref('')
 const moreOpen = ref(false)
 const pageActions = ref<PageAction[]>([])
 const pageActionMenuOpen = ref(false)
+const runtime = useRuntimeMonitoring()
 const storedTheme = typeof window === 'undefined' ? null : window.localStorage.getItem('honk-theme')
 const followsSystemTheme = ref(storedTheme !== 'light' && storedTheme !== 'dark')
 const theme = ref<'light' | 'dark'>(storedTheme === 'dark' || (storedTheme !== 'light' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light')
@@ -37,12 +41,15 @@ let mediaQuery: MediaQueryList | undefined
 
 const navigation = computed(() => [
   { id: 'home' as const, label: t('home'), icon: Home },
+  { id: 'traffic' as const, label: t('traffic'), icon: ChartNoAxesCombined },
+  { id: 'connections' as const, label: t('connections'), icon: Cable },
   { id: 'nodes' as const, label: t('nodes'), icon: Server },
   { id: 'devices' as const, label: t('devices'), icon: Network },
   { id: 'advanced' as const, label: t('advanced'), icon: FileCode2 },
   { id: 'diagnostics' as const, label: t('diagnostics'), icon: Activity },
   { id: 'logs' as const, label: t('logs'), icon: ScrollText },
 ])
+const runtimePageActive = computed(() => active.value === 'traffic' || active.value === 'connections')
 function navigate(view: ViewName) {
   active.value = view
   moreOpen.value = false
@@ -108,6 +115,10 @@ function handleSystemTheme(event: MediaQueryListEvent) {
 }
 
 watch(active, () => setPageActions([]))
+watch([runtimePageActive, () => state.value?.revision, () => state.value?.running], ([visible, revision]) => {
+  if (visible && revision) void runtime.activate(revision)
+  else runtime.deactivate()
+}, { immediate: true })
 watch(theme, applyTheme)
 
 async function refresh() {
@@ -183,6 +194,8 @@ onBeforeUnmount(() => {
 
       <main class="content" :aria-busy="loading">
         <HomeView v-if="active === 'home'" :state="state" :loading="loading" @changed="refresh" @notice="showNotice" @error="message => error = message" @page-actions="setPageActions" />
+        <TrafficView v-else-if="active === 'traffic'" :state="state" :runtime="runtime" @changed="refresh" @notice="showNotice" @error="message => error = message" />
+        <ConnectionsView v-else-if="active === 'connections'" :state="state" :runtime="runtime" @changed="refresh" @notice="showNotice" @error="message => error = message" />
         <NodesView v-else-if="active === 'nodes'" :state="state" @changed="refresh" @notice="showNotice" @error="message => error = message" @page-actions="setPageActions" />
         <DevicesView v-else-if="active === 'devices'" :state="state" @changed="refresh" @notice="showNotice" @error="message => error = message" @page-actions="setPageActions" />
         <AdvancedView v-else-if="active === 'advanced'" @changed="refresh" @notice="showNotice" @error="message => error = message" @page-actions="setPageActions" />
@@ -194,9 +207,11 @@ onBeforeUnmount(() => {
 
     <nav class="mobile-nav" :aria-label="t('menu')">
       <button v-for="item in navigation.slice(0, 4)" :key="item.id" :class="{ active: active === item.id }" @click="navigate(item.id)"><component :is="item.icon" :size="19" /><span>{{ item.label }}</span></button>
-      <button :class="{ active: active === 'diagnostics' || active === 'logs' }" @click="moreOpen = !moreOpen"><Menu :size="19" /><span>{{ t('more') }}</span></button>
+      <button :class="{ active: ['devices', 'advanced', 'diagnostics', 'logs'].includes(active) }" @click="moreOpen = !moreOpen"><Menu :size="19" /><span>{{ t('more') }}</span></button>
     </nav>
     <div v-if="moreOpen" class="mobile-more" role="dialog" :aria-label="t('more')">
+      <button @click="navigate('devices')"><Network :size="18" />{{ t('devices') }}</button>
+      <button @click="navigate('advanced')"><FileCode2 :size="18" />{{ t('advanced') }}</button>
       <button @click="navigate('diagnostics')"><Activity :size="18" />{{ t('diagnostics') }}</button>
       <button @click="navigate('logs')"><ScrollText :size="18" />{{ t('logs') }}</button>
     </div>

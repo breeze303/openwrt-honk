@@ -31,7 +31,12 @@ end
 package.preload["nixio"] = function()
 	return {
 		getpid = function() return 4343 end,
-		open = function() return { lock = function() return true end, close = function() end } end,
+		open = function(path)
+			if path == "/dev/urandom" then
+				return { read = function(_, size) return string.rep(string.char(17), size) end, close = function() end }
+			end
+			return { lock = function() return true end, close = function() end }
+		end,
 		nanosleep = function() end,
 	}
 end
@@ -60,7 +65,7 @@ package.preload["luci.model.uci"] = function()
 	}
 end
 
-local alive, init_calls = arg[4] ~= "subscription-stopped", 0
+local alive, init_calls = arg[4] ~= "subscription-stopped" and arg[4] ~= "runtime-stopped", 0
 package.preload["luci.sys"] = function()
 	return {
 		call = function(command)
@@ -153,6 +158,34 @@ elseif arg[4] == "clash-api" then
 	assert(result and result.ok and not result.enabled and not status, "Clash API disable failed")
 	assert(read(arg[2]):find("external_controller: ''"), "Clash API controller was not disabled")
 	print("clash-api=toggle")
+elseif arg[4] == "runtime-running" or arg[4] == "runtime-stopped" then
+	local existing_secret = arg[4] == "runtime-stopped" and "fixture-secret" or ""
+	local runtime_fixture = previous:gsub("experimental {", "experimental {\n\tclash_api {\n\t\texternal_controller: '127.0.0.1:9191'\n\t\texternal_ui: '/custom/ui'\n\t\tsecret: '" .. existing_secret .. "'\n\t\tunknown_option: 'preserved'\n\t}", 1)
+	write(arg[2], runtime_fixture)
+	local runtime_expected = config.file_revision(arg[2])
+	local before = service.runtime_dashboard()
+	assert(before and before.ok and not before.ready and before.needsPreparation, "loopback runtime API was reported ready")
+	local result, status = service.runtime_prepare({ expectedRevision = runtime_expected })
+	assert(result and result.ok and result.changed and not status, "runtime monitoring preparation failed")
+	local committed = read(arg[2])
+	assert(committed:find("external_controller: '0%.0%.0%.0:9191'"), "runtime controller port was not preserved")
+	assert(committed:find("external_ui: '/custom/ui'", 1, true), "runtime preparation replaced an existing Clash field")
+	assert(committed:find("unknown_option: 'preserved'", 1, true), "runtime preparation dropped an unknown Clash field")
+	assert(committed:find("cache_file", 1, true), "runtime preparation dropped another experimental section")
+	local after = assert(result.runtime, "runtime response missing")
+	assert(after.ready and not after.needsPreparation and after.controllerPort == 9191, "prepared runtime API is not ready")
+	assert(after.dns and after.dns.bind and after.dns.direct and after.dns.proxy, "runtime DNS summary missing")
+	if arg[4] == "runtime-running" then
+		assert(after.secret == string.rep("11", 32), "runtime secret was not generated from strong random bytes")
+		assert(alive and init_calls == 1, "running service was not restarted exactly once")
+	else
+		assert(after.secret == existing_secret, "existing runtime secret was not preserved")
+		assert(not alive and init_calls == 0, "stopped service state changed during runtime preparation")
+	end
+	local unchanged, unchanged_status = service.runtime_prepare({ expectedRevision = config.file_revision(arg[2]) })
+	assert(unchanged and unchanged.ok and not unchanged.changed and not unchanged_status, "ready runtime configuration was rewritten")
+	assert(init_calls == (arg[4] == "runtime-running" and 1 or 0), "ready runtime preparation changed service state")
+	print("runtime-monitoring=" .. (arg[4] == "runtime-running" and "restarted" or "stayed-stopped"))
 elseif arg[4] == "subscription-stopped" then
 	local offline = previous:gsub("https://subscriber%.invalid/list%?token=REDACTED", "socks5://127.0.0.2:1080#offline-node")
 	assert(offline ~= previous, "offline subscription fixture was not prepared")

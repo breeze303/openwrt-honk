@@ -4,11 +4,10 @@
 
 本仓库将 [Honk](https://github.com/Glassyiris/honk) Rust/eBPF 透明代理引擎打包为 OpenWrt 软件包，并提供原生 LuCI 管理界面。
 
-包含三个软件包：
+发布构建包含两个软件包：
 
 - honk：honk-core、honk-tool、procd 服务、默认配置、eBPF 资源和运行日志。
 - luci-app-honk：新版独立 LuCI 控制器、模式/DNS 生成器、节点与设备规则、诊断和前端页面。
-- luci-app-honk-legacy：保留的旧版 LuCI 页面，用于回滚和迁移参考，拥有独立控制器、ACL、菜单、API 和静态资源命名空间。
 
 构建使用 `locks/source.lock.json` 中记录的上游提交，当前支持 OpenWrt x86_64 和 aarch64。定时工作流每天检查 Honk `main`，并为通过源码、哈希和补丁验证的新提交创建更新 PR。
 
@@ -41,7 +40,6 @@
 ~~~text
 honk/                  Honk 引擎和服务的 OpenWrt 配方
 luci-app-honk/         新版独立 LuCI 软件包和前端源码
-luci-app-honk-legacy/  保留的旧版 LuCI 软件包和前端源码
 honk/patches/          OpenWrt 专用上游补丁
 locks/source.lock.json 源码和补丁摘要锁定文件
 tests/                 打包和集成检查
@@ -82,11 +80,11 @@ printf '%s  %s\n' \
 tar --zstd -xf /tmp/bpf-linker.tar.zst -C "$HOME/.cargo/bin"
 ~~~
 
-构建任一 LuCI 页面需要 Node.js 22 和 npm。Rust 和 eBPF linker 会在 SDK 构建容器内安装并用于源码构建。
+构建 LuCI 页面需要 Node.js 22 和 npm。Rust 和 eBPF linker 会在 SDK 构建容器内安装并用于源码构建。
 
 ### OpenWrt 运行依赖
 
-`honk` 软件包声明 `ca-bundle`、`ip-full`、`tc-full`、`nsenter`、`libstdcpp`、`jq`、`kmod-sched-core`、`kmod-sched-bpf`、`kmod-veth`、`v2ray-geoip` 和 `v2ray-geosite`。新版 LuCI 还需要 `luci-base`、`luci-compat`、`curl`；旧版 LuCI 需要 `luci-base` 和 `luci-compat`。目标内核需要提供 `CONFIG_BPF`、`CONFIG_BPF_SYSCALL`、`CONFIG_BPF_JIT`、`CONFIG_CGROUP_BPF`、`CONFIG_NET_CLS_BPF`、`CONFIG_NET_SCH_INGRESS`、`CONFIG_NET_CLS_ACT`、`CONFIG_NET_NS`、`CONFIG_VETH` 和 `CONFIG_DEBUG_INFO_BTF`。
+`honk` 软件包声明 `ca-bundle`、`ip-full`、`tc-full`、`nsenter`、`libstdcpp`、`jq`、`kmod-sched-core`、`kmod-sched-bpf`、`kmod-veth`、`v2ray-geoip` 和 `v2ray-geosite`。LuCI 软件包还需要 `luci-base`、`luci-compat`、`curl`。目标内核需要提供 `CONFIG_BPF`、`CONFIG_BPF_SYSCALL`、`CONFIG_BPF_JIT`、`CONFIG_CGROUP_BPF`、`CONFIG_NET_CLS_BPF`、`CONFIG_NET_SCH_INGRESS`、`CONFIG_NET_CLS_ACT`、`CONFIG_NET_NS`、`CONFIG_VETH` 和 `CONFIG_DEBUG_INFO_BTF`。
 
 GeoSite 与 GeoIP 由 OpenWrt 的 `v2ray-geosite`、`v2ray-geoip` 软件包安装到 `/usr/share/v2ray/geosite.dat`、`/usr/share/v2ray/geoip.dat`。Honk 在构建和运行期间均不下载、打包、修改或锁定 Geo 数据；用户可通过 OpenWrt 软件包管理器自行安装和更新这些数据包。
 
@@ -103,7 +101,6 @@ make menuconfig
 make package/honk/download V=s
 make package/honk/compile V=s
 make package/luci-app-honk/compile V=s
-make package/luci-app-honk-legacy/compile V=s
 ~~~
 
 `package/honk/compile` 始终从 GitHub 下载 `source.mk` 锁定的 Honk 上游归档，校验软件包哈希，应用 `honk/patches/`，使用锁定的 nightly 工具链构建 eBPF 对象，再为目标 OpenWrt 架构构建 `honk-core` 和 `honk-tool`。不再使用 `honk/files/bin` staging 目录，也不依赖二进制 Release。
@@ -111,12 +108,10 @@ make package/luci-app-honk-legacy/compile V=s
 ### 单独构建 LuCI 前端
 
 ~~~sh
-for app in luci-app-honk/ui luci-app-honk-legacy/ui; do
-  (cd "$app" && npm ci && npm run typecheck && npm run build)
-done
+(cd luci-app-honk/ui && npm ci && npm run typecheck && npm run build)
 ~~~
 
-生成资源分别提交在 `luci-app-honk/root/www/luci-static/resources/honk/app/` 和 `luci-app-honk-legacy/root/www/luci-static/resources/honk-legacy/app/`。
+生成资源提交在 `luci-app-honk/root/www/luci-static/resources/honk/app/`。
 
 发布软件包前运行仓库检查：
 
@@ -137,13 +132,13 @@ git diff --check
 `Build packages` 工作流在每个 OpenWrt SDK 矩阵任务中直接从锁定的上游源码构建 Honk。辅助脚本会安装锁定的 Rust host feed、nightly `rust-src` 和已校验的 `bpf-linker`，然后调用 `package/honk/download` 与 `package/honk/compile`。构建矩阵包括：
 
 - OpenWrt 24.10：x86_64 和 aarch64_generic 的 IPK。
-- OpenWrt 25.12：x86_64 和 aarch64_generic 的 APK。
+- OpenWrt 25.12：x86_64、aarch64_generic 和 aarch64_cortex-a53 的 APK。
 
-每个矩阵任务都会上传刚刚编译出的 `honk`、`luci-app-honk` 和 `luci-app-honk-legacy` 三个工作流产物。四组构建全部通过后，软件包会发布到带版本号的 GitHub Release。发布文件名会追加架构和 SDK，便于区分 LuCI 的全架构软件包。
+每个矩阵任务都会上传刚刚编译出的 `honk` 和 `luci-app-honk` 两个工作流产物。五组构建全部通过后，软件包会发布到带版本号的 GitHub Release。发布文件名会追加架构和 SDK，便于区分 LuCI 的全架构软件包。
 
 ## 安装
 
-先安装 honk，再安装新版 luci-app-honk。只有需要回滚或参考旧页面时才安装 luci-app-honk-legacy；两者路径完全隔离。根据目标系统使用对应的软件包管理器：
+先安装 honk，再安装 luci-app-honk。根据目标系统使用对应的软件包管理器：
 
 ~~~sh
 # 使用 apk 的 OpenWrt snapshot
@@ -159,7 +154,7 @@ LuCI 页面地址：
 /cgi-bin/luci/admin/services/honk
 ~~~
 
-新版页面地址为 `/cgi-bin/luci/admin/services/honk`，旧版页面地址为 `/cgi-bin/luci/admin/services/honk-legacy/`。新版控制器会保留现有节点、订阅、experimental 和未知 section，只重建自己管理的模式 section。每次应用都会校验、备份、原子写入、重启、健康检查，失败时恢复上一份配置。
+页面地址为 `/cgi-bin/luci/admin/services/honk`。控制器会保留现有节点、订阅、experimental 和未知 section，只重建自己管理的模式 section。每次应用都会校验、备份、原子写入、重启、健康检查，失败时恢复上一份配置。
 
 ## Quick Setup 与 Geo 资产
 

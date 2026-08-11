@@ -217,3 +217,79 @@ export type NetworkDiscovery = {
   current?: { lan: string; wan: string; dialMode: DialMode }
   revision?: string
 }
+
+export type RuntimeDnsSummary = {
+  bind: string
+  direct: string
+  proxy: string
+}
+
+export type RuntimeDashboardResponse = {
+  ok: boolean
+  ready: boolean
+  needsPreparation: boolean
+  running: boolean
+  controllerPort: number
+  secret: string
+  reasons: string[]
+  configuredNodeCount: number
+  dns: RuntimeDnsSummary
+}
+
+export type RuntimePrepareResponse = {
+  ok: boolean
+  changed: boolean
+  revision: string
+  running: boolean
+  runtime: RuntimeDashboardResponse
+}
+
+export type DelayHistory = { time: string; delay: number }
+export type RuntimeProxy = {
+  name: string
+  type: string
+  all?: string[]
+  now?: string
+  history?: DelayHistory[]
+  udp?: boolean
+}
+export type ProxyDocument = { proxies: Record<string, RuntimeProxy> }
+export type RuntimeConfig = { mode: string; 'mode-list'?: string[] }
+export type ConnectionInfo = {
+  id: string
+  metadata: {
+    network: string
+    sourceIP: string
+    destinationIP: string
+    sourcePort: string
+    destinationPort: string
+    host: string
+    process?: string
+    processPath?: string
+  }
+  upload: number
+  download: number
+  start: string
+  chains: string[]
+  rule: string
+  rulePayload: string
+}
+export type ConnectionsDocument = {
+  downloadTotal: number
+  uploadTotal: number
+  memory: number
+  connections: ConnectionInfo[]
+}
+export type RuntimeRule = { type?: string; payload?: string; proxy?: string; size?: number }
+export type RulesDocument = { rules: RuntimeRule[] }
+export type OutboundStat = {
+  name: string
+  totalConns: number
+  activeConns: number
+  upload: number
+  download: number
+  errors: number
+}
+export type StatsDocument = { outbounds: OutboundStat[] }
+export type TrafficFrame = { up: number; down: number }
+export type MemoryFrame = { inuse: number }

@@ -8,7 +8,7 @@ local API_NAMES = {
 	"state", "preview", "apply", "service", "sources", "advanced", "validate_advanced",
 	"apply_advanced", "refresh_subscription", "subscription_cache", "delete_subscription_cache", "delay", "connectivity", "diagnostics", "logs", "clear_logs",
 	"toggle_clash_api", "default_config", "reset_config",
-	"network_interfaces", "apply_interfaces",
+	"network_interfaces", "apply_interfaces", "runtime_dashboard", "runtime_prepare",
 }
 
 function index()
@@ -90,6 +90,8 @@ function api_connectivity() mutate("connectivity") end
 function api_reset_config() mutate("reset_config") end
 function api_network_interfaces() respond(require("luci.model.service").network_interfaces()) end
 function api_apply_interfaces() mutate("apply_interfaces") end
+function api_runtime_dashboard() respond(require("luci.model.service").runtime_dashboard()) end
+function api_runtime_prepare() mutate("runtime_prepare") end
 
 function api_validate_advanced()
 	if not post_guard() then return end

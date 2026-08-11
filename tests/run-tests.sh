@@ -76,8 +76,10 @@ fi
 grep -F 'pub fn parse_subscription_content' "$source_dir/crates/honk-core/src/subscription.rs" >/dev/null
 grep -F 'openwrt-24.10' .github/workflows/build-packages.yml >/dev/null
 grep -F 'openwrt-25.12' .github/workflows/build-packages.yml >/dev/null
+grep -F 'arch: aarch64_cortex-a53' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: ipk' .github/workflows/build-packages.yml >/dev/null
 grep -F 'package_ext: apk' .github/workflows/build-packages.yml >/dev/null
+grep -F 'if [ "${#packages[@]}" -ne 2 ]; then' .github/workflows/build-packages.yml >/dev/null
 grep -F 'schedule:' .github/workflows/update-honk-source.yml >/dev/null
 grep -F 'refs/heads/main' .github/workflows/update-honk-source.yml >/dev/null
 grep -F 'update-honk-source.sh' .github/workflows/update-honk-source.yml >/dev/null
@@ -96,7 +98,10 @@ grep -F 'cargo fetch --locked' .github/workflows/ci.yml >/dev/null
 grep -F 'cargo build --locked --manifest-path "$source_dir/Cargo.toml" -p honk-tool' .github/workflows/ci.yml >/dev/null
 grep -F 'ripgrep clang llvm libclang-dev pkg-config cmake' .github/workflows/ci.yml >/dev/null
 test ! -e locks/geo.lock.json
-grep -F 'luci-app-honk-legacy/ui/package-lock.json --cache .cache/npm' .github/workflows/ci.yml >/dev/null
+if rg -n 'luci-app-honk-legacy' .github/scripts/build-packages-in-sdk.sh .github/workflows/build-packages.yml .github/workflows/ci.yml; then
+	echo 'legacy LuCI package must not be built by GitHub Actions' >&2
+	exit 1
+fi
 test ! -e .github/workflows/build-honk-binaries.yml
 test ! -e .github/scripts/build-honk-binaries.sh
 test ! -e .github/scripts/download-honk-binaries.sh

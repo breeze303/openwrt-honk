@@ -1,4 +1,4 @@
-import type { ConnectivityCheck, ConnectivityResponse, DelayResponse, DiagnosticsResponse, DialMode, LogLevel, ModeInput, NetworkDiscovery, PreviewResponse, StateResponse, SubscriptionCacheResponse } from './types'
+import type { ConnectivityCheck, ConnectivityResponse, DelayResponse, DiagnosticsResponse, DialMode, LogLevel, ModeInput, NetworkDiscovery, PreviewResponse, RuntimeDashboardResponse, RuntimePrepareResponse, StateResponse, SubscriptionCacheResponse } from './types'
 
 export type DefaultConfigResponse = {
   ok: boolean
@@ -122,4 +122,6 @@ export const api = {
   diagnostics: () => request<DiagnosticsResponse>('diagnostics'),
   logs: () => request<{ ok: boolean; lines: string }>('logs'),
   clearLogs: () => request<{ ok: boolean; cleared: boolean }>('clear_logs', {}),
+  runtimeDashboard: () => request<RuntimeDashboardResponse>('runtime_dashboard'),
+  prepareRuntime: (expectedRevision: string) => request<RuntimePrepareResponse>('runtime_prepare', { expectedRevision }),
 }

@@ -9,6 +9,7 @@ local mode = require "luci.model.mode"
 local node = require "luci.model.node"
 local subscription = require "luci.model.subscription"
 local network = require "luci.model.honk_network"
+local dns = require "luci.model.dns"
 
 local M = {}
 
@@ -204,25 +205,43 @@ local function compile(input)
 	return compiled, nil, content
 end
 
-local function clash_api_status(content)
+local function clash_api_status(content, include_secret)
 	local experimental = config.section(content, "experimental")
 	if not experimental then
-		return { enabled = false, controller = "", port = nil, secretConfigured = false }
+		return { enabled = false, controller = "", port = nil, secretConfigured = false, browserAccessible = false, secret = include_secret and "" or nil }
 	end
 	local body = config.section_body(content, experimental)
 	local clash = config.section(body, "clash_api")
 	if not clash then
-		return { enabled = false, controller = "", port = nil, secretConfigured = false }
+		return { enabled = false, controller = "", port = nil, secretConfigured = false, browserAccessible = false, secret = include_secret and "" or nil }
 	end
 	local values = config.key_values(config.section_body(body, clash))
 	local controller = config.trim(values.external_controller or "")
-	local port = tonumber(controller:match(":(%d+)$"))
-	return {
+	local authority = controller:gsub("^https?://", ""):match("^([^/]+)") or ""
+	local host, raw_port = authority:match("^%[([^%]]+)%]:(%d+)$")
+	if not host then host, raw_port = authority:match("^(.*):(%d+)$") end
+	local port = tonumber(raw_port)
+	if not port or port < 1 or port > 65535 then port = nil end
+	host = config.trim(host or ""):lower()
+	local browser_accessible = port ~= nil and host ~= "" and host ~= "127.0.0.1" and host ~= "localhost" and host ~= "::1"
+	local result = {
 		enabled = controller ~= "" and port ~= nil,
 		controller = controller,
 		port = port,
 		secretConfigured = config.trim(values.secret or "") ~= "",
+		browserAccessible = browser_accessible,
 	}
+	if include_secret then result.secret = config.trim(values.secret or "") end
+	return result
+end
+
+local function random_secret()
+	local source = nixio.open("/dev/urandom", "r")
+	if not source then return nil end
+	local bytes = source:read(32)
+	source:close()
+	if type(bytes) ~= "string" or #bytes ~= 32 then return nil end
+	return (bytes:gsub(".", function(char) return string.format("%02x", char:byte()) end))
 end
 
 local function replace_body_key(body, key, value)
@@ -266,6 +285,27 @@ local function clash_api_candidate(content, enabled)
 		block = "\tclash_api {" .. clash_body .. "}"
 	else
 		block = "\tclash_api {\n\t\texternal_controller: " .. config.dae_quote(desired_controller) .. "\n\t}"
+	end
+	return config.replace_nested_section(content, "experimental", "clash_api", block)
+end
+
+local function runtime_api_candidate(content, status, secret)
+	local controller = "0.0.0.0:" .. tostring(status.port or 9090)
+	local experimental = config.section(content, "experimental")
+	if not experimental then
+		local block = "\tclash_api {\n\t\texternal_controller: " .. config.dae_quote(controller) .. "\n\t\texternal_ui: '/www/luci-static/resources/honk/app'\n\t\tsecret: " .. config.dae_quote(secret) .. "\n\t\tdefault_mode: 'Rule'\n\t}"
+		return config.replace_nested_section(content, "experimental", "clash_api", block)
+	end
+	local body = config.section_body(content, experimental)
+	local clash = config.section(body, "clash_api")
+	local block
+	if clash then
+		local clash_body = config.section_body(body, clash)
+		clash_body = replace_body_key(clash_body, "external_controller", config.dae_quote(controller))
+		clash_body = replace_body_key(clash_body, "secret", config.dae_quote(secret))
+		block = "\tclash_api {" .. clash_body .. "}"
+	else
+		block = "\tclash_api {\n\t\texternal_controller: " .. config.dae_quote(controller) .. "\n\t\texternal_ui: '/www/luci-static/resources/honk/app'\n\t\tsecret: " .. config.dae_quote(secret) .. "\n\t\tdefault_mode: 'Rule'\n\t}"
 	end
 	return config.replace_nested_section(content, "experimental", "clash_api", block)
 end
@@ -448,6 +488,54 @@ end
 
 function M.advanced()
 	return M.state(true)
+end
+
+function M.runtime_dashboard()
+	local content = config.read()
+	local status = clash_api_status(content, true)
+	local ready = status.browserAccessible and status.secretConfigured
+	local reasons = {}
+	if not status.browserAccessible then reasons[#reasons + 1] = "controller-unreachable" end
+	if not status.secretConfigured then reasons[#reasons + 1] = "secret-missing" end
+	local catalog = node.catalog(content)
+	return {
+		ok = true,
+		ready = ready,
+		needsPreparation = not ready,
+		running = running(),
+		controllerPort = status.port or 9090,
+		secret = ready and status.secret or "",
+		reasons = reasons,
+		configuredNodeCount = #(catalog.nodes or {}) + #(catalog.subscriptionNodes or {}),
+		dns = dns.current(content),
+	}
+end
+
+function M.runtime_prepare(input)
+	if type(input) ~= "table" or type(input.expectedRevision) ~= "string" or input.expectedRevision == "" then
+		return error_result("REVISION_REQUIRED", nil, 400)
+	end
+	if config.file_revision() ~= input.expectedRevision then return error_result("REVISION_CONFLICT", nil, 409) end
+	local content = config.read()
+	local status = clash_api_status(content, true)
+	if status.browserAccessible and status.secretConfigured then
+		local runtime = M.runtime_dashboard()
+		return { ok = true, changed = false, revision = input.expectedRevision, running = runtime.running, runtime = runtime }
+	end
+	local secret = status.secretConfigured and status.secret or random_secret()
+	if not secret then return error_result("CLASH_API_INVALID", "runtime monitoring secret generation failed", 500) end
+	local candidate, candidate_error = runtime_api_candidate(content, status, secret)
+	if not candidate then return error_result("CLASH_API_INVALID", candidate_error, 422) end
+	local was_running = running()
+	local result, code = M.apply_content(candidate, input.expectedRevision, {
+		type = "runtime-monitoring",
+		noService = not was_running,
+	})
+	if type(result) == "table" and result.ok then
+		result.changed = true
+		result.runtime = M.runtime_dashboard()
+	end
+	return result, code
 end
 
 function M.toggle_clash_api(input)

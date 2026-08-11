@@ -65,16 +65,9 @@ jobs:
           cache: npm
           cache-dependency-path: |
             luci-app-honk/ui/package-lock.json
-            luci-app-honk-legacy/ui/package-lock.json
       - name: Provision locked UI caches
-        run: |
-          .github/scripts/provision-ui-cache.sh --lock luci-app-honk/ui/package-lock.json --cache .cache/npm --evidence .cache/evidence/dashboard-cache.json
-          .github/scripts/provision-ui-cache.sh --lock luci-app-honk-legacy/ui/package-lock.json --cache .cache/npm --evidence .cache/evidence/legacy-dashboard-cache.json
+        run: .github/scripts/provision-ui-cache.sh --lock luci-app-honk/ui/package-lock.json --cache .cache/npm --evidence .cache/evidence/dashboard-cache.json
       - name: Build dashboard offline
         run: env HOME="$RUNNER_TEMP/honk-ui-home" npm_config_cache="$PWD/.cache/npm" npm ci --offline --ignore-scripts --prefix luci-app-honk/ui && env HOME="$RUNNER_TEMP/honk-ui-home" npm_config_cache="$PWD/.cache/npm" npm run build --prefix luci-app-honk/ui
-      - name: Build legacy dashboard offline
-        run: env HOME="$RUNNER_TEMP/honk-ui-home" npm_config_cache="$PWD/.cache/npm" npm ci --offline --ignore-scripts --prefix luci-app-honk-legacy/ui && env HOME="$RUNNER_TEMP/honk-ui-home" npm_config_cache="$PWD/.cache/npm" npm run build --prefix luci-app-honk-legacy/ui
       - run: .github/scripts/check-dashboard-assets.sh --manifest .cache/evidence/dashboard-assets.json
-      - run: .github/scripts/check-dashboard-assets.sh --app-dir "$PWD/luci-app-honk-legacy/root/www/luci-static/resources/honk-legacy/app" --manifest .cache/evidence/legacy-dashboard-assets.json
       - run: git diff --exit-code -- luci-app-honk/root/www/luci-static/resources/honk/app
-      - run: git diff --exit-code -- luci-app-honk-legacy/root/www/luci-static/resources/honk-legacy/app

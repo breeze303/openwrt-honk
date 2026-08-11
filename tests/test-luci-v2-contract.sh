@@ -31,7 +31,7 @@ transaction_config="$tmp/transaction.dae"
 cp "$repo_root/tests/fixtures/luci-v2-config.dae" "$transaction_config"
 chmod 600 "$transaction_config"
 mkdir -p "$tmp/run"
-for outcome in success failure conflict interfaces local-dns clear-logs; do
+for outcome in success failure conflict interfaces local-dns clear-logs runtime-running runtime-stopped; do
 	cp "$repo_root/tests/fixtures/luci-v2-config.dae" "$transaction_config"
 	chmod 600 "$transaction_config"
 	HONK_CONFIG_PATH="$transaction_config" \
@@ -51,6 +51,8 @@ grep -F 'transaction=conflict' "$tmp/transaction-conflict.log" >/dev/null
 grep -F 'interfaces=config-returned' "$tmp/transaction-interfaces.log" >/dev/null
 grep -F 'local-dns=persisted' "$tmp/transaction-local-dns.log" >/dev/null
 grep -F 'logs=cleared' "$tmp/transaction-clear-logs.log" >/dev/null
+grep -F 'runtime-monitoring=restarted' "$tmp/transaction-runtime-running.log" >/dev/null
+grep -F 'runtime-monitoring=stayed-stopped' "$tmp/transaction-runtime-stopped.log" >/dev/null
 cp "$repo_root/tests/fixtures/luci-v2-config.dae" "$transaction_config"
 chmod 600 "$transaction_config"
 HONK_CONFIG_PATH="$transaction_config" \
@@ -83,8 +85,22 @@ grep -F 'function M.subscription_url' "$repo_root/luci-app-honk/luasrc/model/nod
 grep -F 'node.subscription_url(content, found.name)' "$repo_root/luci-app-honk/luasrc/model/service.lua" >/dev/null
 grep -F 'function M.toggle_clash_api' "$repo_root/luci-app-honk/luasrc/model/service.lua" >/dev/null
 grep -F 'api_toggle_clash_api' "$repo_root/luci-app-honk/luasrc/controller/honk.lua" >/dev/null
+grep -F 'api_runtime_dashboard' "$repo_root/luci-app-honk/luasrc/controller/honk.lua" >/dev/null
+grep -F 'api_runtime_prepare' "$repo_root/luci-app-honk/luasrc/controller/honk.lua" >/dev/null
 grep -F 'admin/services/honk/api/toggle_clash_api' "$repo_root/luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json" >/dev/null
+grep -F 'admin/services/honk/api/runtime_dashboard' "$repo_root/luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json" >/dev/null
+grep -F 'admin/services/honk/api/runtime_prepare' "$repo_root/luci-app-honk/root/usr/share/luci/menu.d/luci-app-honk.json" >/dev/null
 grep -F 'toggleClashApi' "$repo_root/luci-app-honk/ui/src/api.ts" >/dev/null
+grep -F 'runtimeDashboard' "$repo_root/luci-app-honk/ui/src/api.ts" >/dev/null
+grep -F 'prepareRuntime' "$repo_root/luci-app-honk/ui/src/api.ts" >/dev/null
+grep -F "activeClient.stream<TrafficFrame>('/traffic'" "$repo_root/luci-app-honk/ui/src/composables/useRuntimeMonitoring.ts" >/dev/null
+grep -F "activeClient.stream<MemoryFrame>('/memory'" "$repo_root/luci-app-honk/ui/src/composables/useRuntimeMonitoring.ts" >/dev/null
+grep -F '}, 1500)' "$repo_root/luci-app-honk/ui/src/composables/useRuntimeMonitoring.ts" >/dev/null
+grep -F '}, 5000)' "$repo_root/luci-app-honk/ui/src/composables/useRuntimeMonitoring.ts" >/dev/null
+grep -F "id: 'traffic' as const" "$repo_root/luci-app-honk/ui/src/App.vue" >/dev/null
+grep -F "id: 'connections' as const" "$repo_root/luci-app-honk/ui/src/App.vue" >/dev/null
+grep -F 'processPath' "$repo_root/luci-app-honk/ui/src/views/ConnectionsView.vue" >/dev/null
+grep -F '<TrafficChart' "$repo_root/luci-app-honk/ui/src/views/TrafficView.vue" >/dev/null
 grep -F 'enableClashApi' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null
 grep -F 'syncNetworkOptions' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null
 grep -F 'source.value = result.config' "$repo_root/luci-app-honk/ui/src/views/AdvancedView.vue" >/dev/null
@@ -157,4 +173,4 @@ if grep -F '@click="void ' "$repo_root/luci-app-honk/ui/src/views/NodesView.vue"
 	exit 1
 fi
 
-printf 'luci-v2 modes=4 transactions=4 preservation=ok\n'
+printf 'luci-v2 modes=4 transactions=4 runtime=2 preservation=ok\n'
