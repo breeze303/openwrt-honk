@@ -62,6 +62,9 @@ rg -F 'ROLLBACK' "$package/ucode/honk/service.uc" >/dev/null
 rg -F 'wait_for_running(action !==' "$package/ucode/honk/service.uc" >/dev/null
 rg -F 'subscription.capture_runtime' "$package/ucode/honk/service.uc" >/dev/null
 rg -F "node.subscription_url(content, found.name)" "$package/ucode/honk/service.uc" >/dev/null
+rg -F "type(subscriptions) !== 'array' && type(subscriptions) !== 'object'" "$package/ucode/honk/node.uc" >/dev/null
+rg -F 'subscription parse failed: ${parser_diagnostic(output, code)}' "$package/ucode/honk/subscription.uc" >/dev/null
+rg -F "'<redacted-url>'" "$package/ucode/honk/subscription.uc" >/dev/null
 test "$(rg -F ", 'preserve');" "$package/ucode/honk/service.uc" | wc -l | tr -d ' ')" -ge 2 || fail 'preserve policy is not used for stopped-service mutations'
 rg -F 'preserve ] && [ "$previous_running" = false ]' "$repo_root/honk/files/quick-transaction-worker" >/dev/null
 

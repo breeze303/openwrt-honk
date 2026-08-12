@@ -59,18 +59,38 @@ function raw_fetch(url, target) {
 	return system(command) === 0 && access(target);
 }
 
+function parser_diagnostic(output, code) {
+	let lines = [];
+	for (let line in split(sprintf('%s', output || ''), '\n')) {
+		line = trim(line);
+		if (!line || line === 'Caused by:' || match(line, /(^|[[:space:]])(TRACE|DEBUG|INFO|WARN|ERROR)([[:space:]]|$)/)) continue;
+		line = replace(line, /^[0-9]+:\s*/, '');
+		if (line) push(lines, line);
+	}
+	let detail = lines[length(lines) - 1] || (code === 0 ? 'parser did not return a JSON node list' : 'parser exited without a usable diagnostic');
+	detail = config.redact(detail);
+	detail = replace(detail, /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^[:space:]'"]+/g, '<redacted-url>');
+	detail = replace(detail, /([Aa]uthorization\s*:\s*[Bb]earer\s+)[^[:space:]]+/g, '$1***');
+	detail = trim(detail);
+	return length(detail) > 240 ? `${substr(detail, 0, 237)}...` : detail;
+}
+
 function tool_nodes(source, payload_file) {
 	let command = `${config.shellquote(config.HONK_TOOL)} sub --format json`;
 	if (payload_file) command += ` --payload-file ${config.shellquote(payload_file)}`;
 	command += ` ${config.shellquote(source)} 2>&1`;
 	const fd = popen(command, 'r');
 	const output = fd?.read?.('all') || '';
-	fd?.close();
-	const start = index(output, '[');
-	if (start < 0) return [null, 'subscription parse failed'];
-	let items;
-	try { items = json(substr(output, start)); } catch (e) { return [null, 'subscription parse failed']; }
-	if (type(items) !== 'array') return [null, 'subscription parse failed'];
+	const code = fd ? fd.close() : 127;
+	let items = null;
+	for (let line in split(output, '\n')) {
+		line = trim(line);
+		if (substr(line, 0, 1) !== '[') continue;
+		try { items = json(line); } catch (e) { continue; }
+		if (type(items) === 'array') break;
+		items = null;
+	}
+	if (type(items) !== 'array') return [null, `subscription parse failed: ${parser_diagnostic(output, code)}`];
 	let normalized = [];
 	for (let item in items) {
 		if (type(item) !== 'object' || type(item.name) !== 'string' || !item.name || length(item.name) > 256) continue;

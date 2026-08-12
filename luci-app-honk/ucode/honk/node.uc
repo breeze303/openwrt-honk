@@ -175,20 +175,29 @@ function configured_groups(content) {
 	return result;
 }
 
+// Honk exposes subscriptions as an array. Keep accepting the original object
+// shape as well so an older runtime does not lose source ownership.
+export function runtime_ownership(subscription_state) {
+	let ownership = {};
+	const subscriptions = subscription_state?.subscriptions;
+	if (type(subscriptions) !== 'array' && type(subscriptions) !== 'object') return ownership;
+	for (let key, item in subscriptions) {
+		if (type(item) !== 'object' || type(item.nodes) !== 'array') continue;
+		const subscription_name = type(item.name) === 'string' && item.name ? item.name : (type(key) === 'string' ? key : null);
+		if (!subscription_name) continue;
+		for (let node in item.nodes)
+			if (type(node) === 'object' && type(node.name) === 'string' && node.name) ownership[node.name] = subscription_name;
+	}
+	return ownership;
+}
+
 export function runtime_catalog(content) {
 	const local_catalog = catalog(content);
 	if (!length(local_catalog.subscriptions)) return { nodes: [], available: false, configured: false };
 	const api = clash_api(content);
 	if (!api) return { nodes: [], available: false, configured: false };
-	let ownership = {};
 	const subscription_state = runtime_request(`${api[0]}/subscriptions`, api[1]);
-	if (type(subscription_state) === 'object' && type(subscription_state.subscriptions) === 'object') {
-		for (let item in subscription_state.subscriptions) {
-			if (type(item) !== 'object' || type(item.name) !== 'string' || type(item.nodes) !== 'array') continue;
-			for (let node in item.nodes)
-				if (type(node) === 'object' && type(node.name) === 'string' && node.name) ownership[node.name] = item.name;
-		}
-	}
+	const ownership = runtime_ownership(subscription_state);
 	const response = runtime_request(`${api[0]}/proxies`, api[1]);
 	if (type(response) !== 'object' || type(response.proxies) !== 'object')
 		return { nodes: [], available: false, configured: true };
