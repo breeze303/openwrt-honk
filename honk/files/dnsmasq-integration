@@ -2,9 +2,10 @@
 
 set -eu
 
-RUN_DIR=/run/honk
+RUN_DIR=${HONK_DNSMASQ_RUN_DIR:-/run/honk}
 STATE_FILE=$RUN_DIR/dnsmasq-forwarding.json
 OWNER=${2:-}
+DNSMASQ_INIT=${HONK_DNSMASQ_INIT:-/etc/init.d/dnsmasq}
 
 dnsmasq_conf_dir() {
 	local section conf_dir
@@ -23,8 +24,8 @@ dnsmasq_conf_dir() {
 }
 
 restart_dnsmasq() {
-	[ -x /etc/init.d/dnsmasq ] || return 2
-	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	[ -x "$DNSMASQ_INIT" ] || return 2
+	"$DNSMASQ_INIT" restart >/dev/null 2>&1
 }
 
 write_state() {
@@ -33,6 +34,17 @@ write_state() {
 	printf '{"schemaVersion":"honk.dnsmasq.v1","owner":"%s","endpoint":"%s","confDir":"%s","active":true}\n' \
 		"$OWNER" 127.0.0.1#1053 "$conf_dir" >"$STATE_FILE"
 	chmod 600 "$STATE_FILE"
+}
+
+owned_fragment() {
+	[ -f "$1" ] || return 1
+	awk '
+		NR == 1 && $0 == "no-poll" { next }
+		NR == 2 && $0 == "no-resolv" { next }
+		NR == 3 && $0 == "server=127.0.0.1#1053" { next }
+		{ invalid = 1 }
+		END { exit (NR == 3 && !invalid) ? 0 : 1 }
+	' "$1"
 }
 
 enable() {
@@ -52,13 +64,24 @@ enable() {
 }
 
 disable() {
-	local conf_dir current_owner
-	[ -r "$STATE_FILE" ] || return 0
-	current_owner="$(sed -n 's/.*"owner":"\([^"]*\)".*/\1/p' "$STATE_FILE")"
-	[ -z "$OWNER" ] || [ "$current_owner" = "$OWNER" ] || return 0
-	conf_dir="$(sed -n 's/.*"confDir":"\([^"]*\)".*/\1/p' "$STATE_FILE")"
-	[ -n "$conf_dir" ] || conf_dir="$(dnsmasq_conf_dir)"
-	rm -f "$conf_dir/90-honk.conf" "$STATE_FILE"
+	local conf_dir current_owner fragment
+	if [ -r "$STATE_FILE" ]; then
+		current_owner="$(sed -n 's/.*"owner":"\([^"]*\)".*/\1/p' "$STATE_FILE")"
+		[ -z "$OWNER" ] || [ "$current_owner" = "$OWNER" ] || return 0
+		conf_dir="$(sed -n 's/.*"confDir":"\([^"]*\)".*/\1/p' "$STATE_FILE")"
+	else
+		# A launcher cleanup with an unknown owner must not race a new enable.
+		[ -z "$OWNER" ] || return 0
+		conf_dir="$(dnsmasq_conf_dir 2>/dev/null || true)"
+	fi
+	[ -n "$conf_dir" ] || { rm -f "$STATE_FILE"; return 0; }
+	fragment="$conf_dir/90-honk.conf"
+	if [ -f "$fragment" ] && ! owned_fragment "$fragment"; then
+		logger -t honk 'preserving non-Honk dnsmasq fragment'
+		rm -f "$STATE_FILE"
+		return 0
+	fi
+	rm -f "$fragment" "$STATE_FILE"
 	restart_dnsmasq || true
 }
 
