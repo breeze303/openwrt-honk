@@ -74,6 +74,25 @@ jq -e '.ok == true and .stage == "committed" and .action == "none"' "$evidence/p
 [ "$(wc -l <"$HONK_QUICK_INIT_LOG")" -eq "$before_init_lines" ] || fail "preserve transaction started a stopped service"
 pass "preserve transaction keeps a stopped service stopped"
 
+# ImmortalWrt's BusyBox image has no stat applet.  Candidate validation must
+# retain its exact 0600 check without relying on an optional coreutils tool.
+printf 'no-stat-previous\n' >"$config"
+chmod 600 "$config"
+printf 'no-stat-candidate\n' >"$candidate"
+chmod 600 "$candidate"
+expected=$(sha256sum "$config" | cut -d ' ' -f1)
+no_stat_bin="$tmp/no-stat-bin"
+mkdir -p "$no_stat_bin"
+cat >"$no_stat_bin/stat" <<'SH'
+#!/bin/sh
+exit 127
+SH
+chmod 700 "$no_stat_bin/stat"
+PATH="$no_stat_bin:$PATH" HONK_QUICK_PREVIOUS_RUNNING=false "$repo_root/honk/files/quick-transaction-worker" --apply "$candidate" "$expected" nonce-no-stat preserve >"$evidence/no-stat.json"
+jq -e '.ok == true and .stage == "committed" and .action == "none"' "$evidence/no-stat.json" >/dev/null || fail "candidate validation without stat"
+[ "$(cat "$config")" = 'no-stat-candidate' ] || fail "no-stat candidate did not become config"
+pass "candidate validation does not depend on stat"
+
 printf 'previous-again\n' >"$config"
 chmod 600 "$config"
 expected=$(sha256sum "$config" | cut -d ' ' -f1)

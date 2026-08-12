@@ -58,6 +58,11 @@ function normalizeState(value: StateResponse): StateResponse {
   }
 }
 
+function bridgePayload<T>(value: T): T {
+  const encoded = JSON.stringify(value)
+  return (encoded ? JSON.parse(encoded) : {}) as T
+}
+
 type ApiResponse = Record<string, unknown> & { ok?: boolean; error?: { code?: string; message?: string } }
 type BridgeMessage = {
   type?: string
@@ -125,13 +130,19 @@ class BridgeClient {
   async request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     await this.readyPromise
     const requestId = this.requestId()
+    let wireParams: Record<string, unknown>
+    try {
+      wireParams = bridgePayload(params)
+    } catch {
+      throw new ApiRequestError('Bridge request contains unsupported data.', 'INVALID_REQUEST', {})
+    }
     const response = await new Promise<ApiResponse>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(requestId)
         reject(new ApiRequestError('Bridge request timed out.', 'REQUEST_TIMEOUT', {}))
       }, REQUEST_TIMEOUT)
       this.pending.set(requestId, { resolve, reject, timer })
-      window.parent.postMessage({ type: 'honk-bridge-request', version: PROTOCOL_VERSION, requestId, method, params }, this.origin)
+      window.parent.postMessage({ type: 'honk-bridge-request', version: PROTOCOL_VERSION, requestId, method, params: wireParams }, this.origin)
     })
     if (response.ok === false) {
       throw new ApiRequestError(response.error?.message || 'Request failed.', response.error?.code || 'REQUEST_FAILED', response)

@@ -27,10 +27,13 @@ sync_parent() {
 safe_file() {
 	[ -f "$1" ] || return 1
 	[ ! -L "$1" ] || return 1
-	if [ "${HONK_QUICK_ALLOW_NONROOT:-0}" != 1 ]; then
-		[ "$(stat -c '%u' "$1")" = "0" ] || return 1
+	# BusyBox builds commonly omit the stat applet.  find provides the same
+	# owner and exact-mode predicates on all supported OpenWrt targets.
+	if [ "${HONK_QUICK_ALLOW_NONROOT:-0}" = 1 ]; then
+		[ -n "$(find "$1" -maxdepth 0 -type f -perm 600 -print 2>/dev/null)" ]
+	else
+		[ -n "$(find "$1" -maxdepth 0 -type f -user 0 -perm 600 -print 2>/dev/null)" ]
 	fi
-	[ "$(stat -c '%a' "$1")" = "600" ] || return 1
 }
 
 write_journal() {
