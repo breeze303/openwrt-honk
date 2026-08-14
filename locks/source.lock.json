@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "source": {
     "archive": {
-      "offlinePath": ".cache/dl/honk-04559741790b9b34512857d3f15954d1fa1cd656.tar.gz",
-      "sha256": "3cbbd84a985456d49b3e4761ea1953aca00416c231b36f35a775c96592135096",
-      "size": 1308615,
-      "topLevelDirectory": "honk-04559741790b9b34512857d3f15954d1fa1cd656",
-      "url": "https://github.com/Glassyiris/honk/archive/04559741790b9b34512857d3f15954d1fa1cd656.tar.gz"
+      "offlinePath": ".cache/dl/honk-88759842126ef9ca8431af50923220084f6f7cdd.tar.gz",
+      "sha256": "0bf36de38e067a90164c979b8652f54e365eb2e34e5856aa6e1774cf3dee53b7",
+      "size": 1462261,
+      "topLevelDirectory": "honk-88759842126ef9ca8431af50923220084f6f7cdd",
+      "url": "https://github.com/Glassyiris/honk/archive/88759842126ef9ca8431af50923220084f6f7cdd.tar.gz"
     },
     "canonicalUrl": "https://github.com/Glassyiris/honk.git",
-    "commit": "04559741790b9b34512857d3f15954d1fa1cd656",
+    "commit": "88759842126ef9ca8431af50923220084f6f7cdd",
     "license": {
-      "sourceLicenseUrl": "https://github.com/Glassyiris/honk/blob/04559741790b9b34512857d3f15954d1fa1cd656/LICENSE",
+      "sourceLicenseUrl": "https://github.com/Glassyiris/honk/blob/88759842126ef9ca8431af50923220084f6f7cdd/LICENSE",
       "spdx": "GPL-3.0-only"
     },
     "patchDigests": [
@@ -27,13 +27,13 @@
     "provenance": {
       "archiveSource": "GitHub commit archive",
       "observedFrom": "refs/heads/main",
-      "providerPath": "github.com/Glassyiris/honk/archive/04559741790b9b34512857d3f15954d1fa1cd656.tar.gz"
+      "providerPath": "github.com/Glassyiris/honk/archive/88759842126ef9ca8431af50923220084f6f7cdd.tar.gz"
     },
     "tagObservation": {
-      "name": null,
-      "object": "04559741790b9b34512857d3f15954d1fa1cd656",
+      "name": "v0.0.1.beta.48",
+      "object": "88759842126ef9ca8431af50923220084f6f7cdd",
       "signatureStatus": "unverified"
     },
-    "tree": "e59d4e7f3798c34435bb84d114c883c136936442"
+    "tree": "ae3a92a4d5b00a2085e0e4b9b2505abd46b88984"
   }
 }

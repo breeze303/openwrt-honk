@@ -22,11 +22,13 @@ grep -F 'qname(geosite: cn) -> proxy-dns' "$dns" >/dev/null
 grep -F 'fallback: proxy-dns' "$dns" >/dev/null
 grep -F 'direct-dns' "$dns" >/dev/null
 grep -F 'proxy-dns' "$dns" >/dev/null
+grep -F 'export function set_bind' "$dns" >/dev/null
+grep -F 'disabled DNS listener retained a bind key' "$runner" >/dev/null
 grep -F 'export function redact' "$config" >/dev/null
 if rg -n 'lua|quick-proxy|honk[_-]legacy' "$dns" "$config" "$runner" >/dev/null; then
 	fail 'legacy DNS implementation reference remains'
 fi
 
-printf '%s\n' '{"schemaVersion":"honk.ucode-dns.v1","ok":true,"modes":["china-direct","gfwlist","china-proxy","global"],"fixture":"luci-honk-dns-runner.uc","redacted":true,"assertions":12}' >"$evidence/dns-matrix.json"
+printf '%s\n' '{"schemaVersion":"honk.ucode-dns.v1","ok":true,"modes":["china-direct","gfwlist","china-proxy","global"],"fixture":"luci-honk-dns-runner.uc","redacted":true,"listenerToggleRemovesBind":true,"assertions":14}' >"$evidence/dns-matrix.json"
 printf '%s\n' '{"fixture":"invalid-upstream","ok":false,"code":"PROXY_DNS_INVALID"}' >"$evidence/failures/invalid-upstream.json"
-printf 'dns-projection assertions=12\n'
+printf 'dns-projection assertions=14\n'

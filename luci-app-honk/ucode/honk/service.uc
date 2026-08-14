@@ -508,8 +508,14 @@ export function apply_interfaces(input) {
 	const candidate = network.update_global(content, selected[0]);
 	if (!candidate[0]) return error_result('CONFIG_INVALID', candidate[1]);
 	let metadata = { type: 'interfaces', lanDevice: selected[0].lan, wanDevice: selected[0].wan, dialMode: selected[0].dialMode, logLevel: selected[0].logLevel };
-	if (local_dns) metadata.localDns = local_dns;
-	const result = apply_content(candidate[0], input.expectedRevision, metadata, 'start');
+	let projected = candidate[0];
+	if (local_dns) {
+		const dns_candidate = dns.set_bind(projected, local_dns.enabled);
+		if (!dns_candidate[0]) return error_result('CONFIG_INVALID', dns_candidate[1]);
+		projected = dns_candidate[0];
+		metadata.localDns = local_dns;
+	}
+	const result = apply_content(projected, input.expectedRevision, metadata, 'start');
 	if (result.ok) {
 		result.interfaces = { lan: selected[0].lan, wan: selected[0].wan };
 		result.dialMode = selected[0].dialMode;

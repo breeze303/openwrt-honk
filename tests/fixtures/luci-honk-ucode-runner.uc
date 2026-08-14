@@ -30,7 +30,21 @@ const runtime_selection = node.select(content, {
 });
 if (!runtime_selection[0] || runtime_selection[0].nodes[0] !== '节点 A | 01') fail('UTF-8 runtime node selection changed');
 
-let candidates = {}, checks = 4;
+const array_ownership = node.runtime_ownership({
+	subscriptions: [
+		{ name: 'fixture-sub', nodes: [ { name: '节点 A | 01' } ] },
+		{ name: 'other-sub', nodes: [ { name: 'node B' } ] },
+	],
+});
+if (array_ownership['节点 A | 01'] !== 'fixture-sub' || array_ownership['node B'] !== 'other-sub') fail('array subscription ownership changed');
+const object_ownership = node.runtime_ownership({
+	subscriptions: {
+		'fixture-sub': { nodes: [ { name: '节点 A | 01' } ] },
+	},
+});
+if (object_ownership['节点 A | 01'] !== 'fixture-sub') fail('object subscription ownership changed');
+
+let candidates = {}, checks = 7;
 for (let name in [ 'china-direct', 'gfwlist', 'china-proxy', 'global' ]) {
 	const compiled = mode.compile(content, {
 		mode: name,

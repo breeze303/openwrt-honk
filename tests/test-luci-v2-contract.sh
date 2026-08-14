@@ -62,6 +62,9 @@ rg -F 'ROLLBACK' "$package/ucode/honk/service.uc" >/dev/null
 rg -F 'wait_for_running(action !==' "$package/ucode/honk/service.uc" >/dev/null
 rg -F 'subscription.capture_runtime' "$package/ucode/honk/service.uc" >/dev/null
 rg -F "node.subscription_url(content, found.name)" "$package/ucode/honk/service.uc" >/dev/null
+rg -F "type(subscriptions) !== 'array' && type(subscriptions) !== 'object'" "$package/ucode/honk/node.uc" >/dev/null
+rg -F 'subscription parse failed: ${parser_diagnostic(output, code)}' "$package/ucode/honk/subscription.uc" >/dev/null
+rg -F "'<redacted-url>'" "$package/ucode/honk/subscription.uc" >/dev/null
 test "$(rg -F ", 'preserve');" "$package/ucode/honk/service.uc" | wc -l | tr -d ' ')" -ge 2 || fail 'preserve policy is not used for stopped-service mutations'
 rg -F 'preserve ] && [ "$previous_running" = false ]' "$repo_root/honk/files/quick-transaction-worker" >/dev/null
 
@@ -73,6 +76,8 @@ rg -F 'MutationObserver' "$view" >/dev/null
 rg -F 'event.source !== iframe.contentWindow' "$view" >/dev/null
 rg -F 'Object.prototype.hasOwnProperty.call(calls, data.method)' "$view" >/dev/null
 rg -F 'calls[data.method](...args)' "$view" >/dev/null
+rg -F 'JSON.stringify(payload)' "$view" >/dev/null
+rg -F 'BRIDGE_RESPONSE_INVALID' "$view" >/dev/null
 rg -F 'luci-*.dae' "$acl" >/dev/null
 rg -F '.dae`' "$package/ucode/honk/config.uc" >/dev/null
 rg -F 'valid_runtime_node_name' "$package/ucode/honk/node.uc" >/dev/null
@@ -80,6 +85,8 @@ rg -F 'honk-bridge-handshake' "$api" >/dev/null
 rg -F 'honk-bridge-request' "$api" >/dev/null
 rg -F 'REQUEST_TIMEOUT' "$api" >/dev/null
 rg -F 'class BridgeClient' "$api" >/dev/null
+rg -F 'function bridgePayload' "$api" >/dev/null
+rg -F 'params: wireParams' "$api" >/dev/null
 if rg -q 'setInterval\([^\n]*refresh' "$package/ui/src/App.vue"; then
 	fail 'dashboard must not poll state on a global timer'
 fi

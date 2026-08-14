@@ -30,6 +30,16 @@ for (let name, rule in expected) {
 	checks += 3;
 }
 
+const listener_source = "dns {\n\tbind: 'tcp+udp://127.0.0.1:1053'\n\tupstream {\n\t\tdirect-dns: 'udp://223.5.5.5:53'\n\t}\n}\n";
+const disabled = dns.set_bind(listener_source, false);
+if (!disabled[0] || index(disabled[0], 'bind:') >= 0) fail('disabled DNS listener retained a bind key');
+if (dns.current(disabled[0]).bind !== '') fail('disabled DNS listener did not remain absent');
+const rendered_without_bind = dns.render('gfwlist', { bind: dns.current(disabled[0]).bind });
+if (!rendered_without_bind[0] || index(rendered_without_bind[0], 'bind:') >= 0) fail('DNS renderer restored a disabled listener');
+const enabled = dns.set_bind(disabled[0], true);
+if (!enabled[0] || index(enabled[0], "bind: 'tcp+udp://127.0.0.1:1053'") < 0) fail('enabled DNS listener did not restore the Honk endpoint');
+checks += 4;
+
 const redacted = config.redact('https://user:password@example.invalid/list?token=SECRET_TOKEN');
 if (index(redacted, 'password') >= 0 || index(redacted, 'SECRET_TOKEN') >= 0) fail('sensitive URI data was not redacted');
 checks++;

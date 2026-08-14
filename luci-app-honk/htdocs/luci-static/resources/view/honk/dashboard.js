@@ -48,6 +48,16 @@ function bridgeError(code, message) {
 	return { code, message };
 }
 
+function bridgePayload(payload) {
+	try {
+		const encoded = JSON.stringify(payload);
+		return encoded ? JSON.parse(encoded) : null;
+	}
+	catch (error) {
+		return null;
+	}
+}
+
 function validRequest(data) {
 	if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
 	if (data.type !== 'honk-bridge-request' || data.version !== PROTOCOL_VERSION) return false;
@@ -67,7 +77,14 @@ return view.extend({
 		});
 		const expectedOrigin = new URL(RESOURCE, window.location.href).origin;
 		const controller = new AbortController();
-		const reply = (requestId, payload) => iframe.contentWindow?.postMessage(payload, expectedOrigin);
+		const reply = (requestId, payload) => {
+			const wirePayload = bridgePayload(payload) || {
+				type: 'honk-bridge-response',
+				requestId,
+				error: bridgeError('BRIDGE_RESPONSE_INVALID', _('The request failed.')),
+			};
+			iframe.contentWindow?.postMessage(wirePayload, expectedOrigin);
+		};
 		const onMessage = event => {
 			if (event.origin !== expectedOrigin || event.source !== iframe.contentWindow) return;
 			const data = event.data;

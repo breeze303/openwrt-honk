@@ -311,7 +311,7 @@ start_service() {
 		''|*[!0-9]*) SUBSCRIPTION_CACHE_TTL=604800 ;;
 	esac
 	mkdir -p "$RUN_DIR" || return 1
-	if [ -x /usr/libexec/honk/quick-transaction-worker ]; then
+	if [ "${HONK_QUICK_SKIP_RECOVERY:-0}" != 1 ] && [ -x /usr/libexec/honk/quick-transaction-worker ]; then
 		HONK_QUICK_RECOVERY_FROM_INIT=1 /usr/libexec/honk/quick-transaction-worker --recover >/run/honk/quick-recovery.json 2>&1 || {
 			logger -t honk "Quick Setup recovery failed"
 			return 1

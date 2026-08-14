@@ -45,6 +45,7 @@ bash -n .github/scripts/target-smoke.sh
 sh -n .github/scripts/target-smoke-remote.sh
 bash -n tests/quick-setup-target-harness.sh
 bash -n honk/files/quick-transaction-worker
+bash -n tests/test-dnsmasq-integration.sh
 bash -n tests/test-dns-projection.sh
 bash -n tests/test-luci-v2-contract.sh
 bash -n tests/test-luci-package-isolation.sh
@@ -169,6 +170,7 @@ bash tests/test-init-geo-contract.sh --evidence "$evidence_root/init-geo"
 bash tests/test-network-discovery.sh --evidence "$evidence_root/network"
 bash tests/test-quick-setup-contract.sh --evidence "$evidence_root/quick-contract"
 bash tests/test-dns-projection.sh --evidence "$evidence_root/dns"
+bash tests/test-dnsmasq-integration.sh --evidence "$evidence_root/dnsmasq"
 bash tests/test-quick-transaction.sh --evidence "$evidence_root/quick-transaction"
 bash tests/test-luci-package-isolation.sh
 grep -F 'pub payload_file: Option<PathBuf>' "$source_dir/crates/honk-tool/src/sub.rs" >/dev/null

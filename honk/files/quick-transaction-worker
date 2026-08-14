@@ -27,10 +27,13 @@ sync_parent() {
 safe_file() {
 	[ -f "$1" ] || return 1
 	[ ! -L "$1" ] || return 1
-	if [ "${HONK_QUICK_ALLOW_NONROOT:-0}" != 1 ]; then
-		[ "$(stat -c '%u' "$1")" = "0" ] || return 1
+	# BusyBox builds commonly omit the stat applet.  find provides the same
+	# owner and exact-mode predicates on all supported OpenWrt targets.
+	if [ "${HONK_QUICK_ALLOW_NONROOT:-0}" = 1 ]; then
+		[ -n "$(find "$1" -maxdepth 0 -type f -perm 600 -print 2>/dev/null)" ]
+	else
+		[ -n "$(find "$1" -maxdepth 0 -type f -user 0 -perm 600 -print 2>/dev/null)" ]
 	fi
-	[ "$(stat -c '%a' "$1")" = "600" ] || return 1
 }
 
 write_journal() {
@@ -42,19 +45,43 @@ write_journal() {
 }
 
 restore_service_state() {
+	local previous_pids
+	previous_pids="$(pidof honk-core 2>/dev/null || true)"
 	case "$1" in
-		true) "$HONK_INIT" restart >/dev/null 2>&1 ;;
-		false) "$HONK_INIT" stop >/dev/null 2>&1 ;;
+		true) HONK_QUICK_SKIP_RECOVERY=1 "$HONK_INIT" restart >/dev/null 2>&1 && wait_for_service "$previous_pids" ;;
+		false) HONK_QUICK_SKIP_RECOVERY=1 "$HONK_INIT" stop >/dev/null 2>&1 ;;
 		*) return 1 ;;
 	esac
 }
 
+wait_for_service() {
+	local previous_pids=$1 attempt=0 attempts=${HONK_QUICK_HEALTH_ATTEMPTS:-15} current stale pid
+	[ "${HONK_QUICK_SKIP_HEALTHCHECK:-0}" = 1 ] && return 0
+	case "$attempts" in ''|*[!0-9]*) attempts=15 ;; esac
+	[ "$attempts" -gt 0 ] || attempts=15
+	while [ "$attempt" -lt "$attempts" ]; do
+		current="$(pidof honk-core 2>/dev/null || true)"
+		if [ -n "$current" ]; then
+			stale=0
+			for pid in $current; do
+				case " $previous_pids " in *" $pid "*) stale=1 ;; esac
+			done
+			[ "$stale" -eq 0 ] && return 0
+		fi
+		attempt=$((attempt + 1))
+		sleep 1
+	done
+	return 1
+}
+
 start_candidate() {
+	local previous_pids=${2:-}
 	case "$1" in
-		true) "$HONK_INIT" restart >/dev/null 2>&1 ;;
-		false) "$HONK_INIT" start >/dev/null 2>&1 ;;
+		true) HONK_QUICK_SKIP_RECOVERY=1 "$HONK_INIT" restart >/dev/null 2>&1 || return 1 ;;
+		false) HONK_QUICK_SKIP_RECOVERY=1 "$HONK_INIT" start >/dev/null 2>&1 || return 1 ;;
 		*) return 1 ;;
 	esac
+	wait_for_service "$previous_pids"
 }
 
 recover() {
@@ -91,7 +118,7 @@ recover() {
 }
 
 apply_candidate() {
-	local candidate=$1 expected=$2 nonce=$3 policy=${4:-start} tmp
+	local candidate=$1 expected=$2 nonce=$3 policy=${4:-start} tmp previous_pids
 	mkdir -p "$STATE_DIR"
 	exec 9>"$LOCK"
 	flock -n 9 || { json_error TRANSACTION_BUSY "another Quick Setup transaction is active"; return 1; }
@@ -101,6 +128,7 @@ apply_candidate() {
 	"$HONK_TOOL" validate --config "$candidate" --json >/dev/null 2>&1 || { json_error INVALID_CONFIG "candidate failed validation"; return 1; }
 	cp "$CONFIG" "$SIDECAR"; chmod 600 "$SIDECAR"
 	previous_running=${HONK_QUICK_PREVIOUS_RUNNING:-$(pidof honk-core >/dev/null 2>&1 && echo true || echo false)}
+	previous_pids="$(pidof honk-core 2>/dev/null || true)"
 	printf '{"schemaVersion":"honk.quick-transaction.v1","nonce":"%s","candidateSha256":"%s","previousSha256":"%s","stage":"prepared","stageHistory":["prepared"],"previousRunning":%s}\n' "$nonce" "$(hash_file "$candidate")" "$(hash_file "$CONFIG")" "$previous_running" >"$JOURNAL"
 	chmod 600 "$JOURNAL"; sync
 	write_journal candidate-written
@@ -113,7 +141,7 @@ apply_candidate() {
 		printf '{"ok":true,"stage":"committed","nonce":"%s","configSha256":"%s","action":"none"}\n' "$nonce" "$(hash_file "$CONFIG")"
 		return 0
 	fi
-	if ! start_candidate "$previous_running"; then
+	if ! start_candidate "$previous_running" "$previous_pids"; then
 		write_journal rollback-in-progress
 		cp "$SIDECAR" "$CONFIG"; chmod 600 "$CONFIG"; sync_parent "$CONFIG"
 		if restore_service_state "$previous_running"; then
