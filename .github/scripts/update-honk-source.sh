@@ -2,8 +2,8 @@
 set -euo pipefail
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-readonly upstream_url=https://github.com/Glassyiris/honk.git
-readonly archive_base=https://github.com/Glassyiris/honk/archive
+readonly upstream_url=https://github.com/daeuniverse/honk.git
+readonly archive_base=https://github.com/daeuniverse/honk/archive
 upstream_ref=refs/heads/main
 requested_commit=''
 
